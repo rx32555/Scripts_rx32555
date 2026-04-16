@@ -53,7 +53,7 @@ adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh
 
 4. Shizuku quedará activo. Abrir la app de Shizuku para confirmarlo.
 
-### Opción B (RECOMENDADO) — Depuración inalámbrica (sin PC, cada reinicio)
+### Opción B — Depuración inalámbrica (sin PC, cada reinicio)
 
 1. Ir a `Opciones de desarrollador > Depuración inalámbrica` y activarla
 2. Abrir **Shizuku** > tocar **Iniciar vía Depuración inalámbrica**
@@ -67,7 +67,7 @@ adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh
 
 1. Abrir **Canta** y asegurarse de que Shizuku esté activo
 2. Tocar el menú (tres puntos) > **Importar perfil**
-3. Seleccionar el archivo `Debloat_list_POCOf7_v1.3.json` o usar opción tomar datos desde el portapapeles (previo copiado del texto documento).
+3. Seleccionar el archivo `Debloat_list_POCOf7_v1.3.json`
 4. Revisar el listado de apps a desinstalar
 5. Confirmar y aplicar
 
@@ -129,5 +129,5 @@ El archivo está ordenado de mayor a menor prioridad de eliminación:
 
 - Probado exclusivamente en **POCO F7 Pro con HyperOS 3.0.x**. Puede no aplicar a otras versiones o modelos.
 - Canta deshabilita las apps a nivel de usuario, no las borra del sistema. Son restaurables.
-- Usa este listado bajo tu propio riesgo.
-- Si algo falla, restaura la app desde Canta o con ADB.
+- Usá este listado bajo tu propio riesgo.
+- Si algo falla, restaurá la app desde Canta o con ADB.
