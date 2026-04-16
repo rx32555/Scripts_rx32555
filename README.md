@@ -2,8 +2,6 @@
 
 Repositorio personal para gestionar scripts varios.
 
-## Scripts Disponibles
-
 
 # HyperOS Debloat List
 https://github.com/rx32555/Scripts_rx32555/tree/main/Android_Xiaomi_HyperOS

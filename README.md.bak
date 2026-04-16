@@ -5,14 +5,14 @@ Repositorio personal para gestionar scripts varios.
 ## Scripts Disponibles
 
 
-# POCO F7 Pro — HyperOS Debloat List
+# HyperOS Debloat List
 https://github.com/rx32555/Scripts_rx32555/tree/main/Android_Xiaomi_HyperOS
 
 Lista de debloat probada para el POCO F7 Pro corriendo HyperOS 3.x / Android 16, compatible con **Canta** (sin root).
 
 ---
 
-## 📱 Dispositivo probado
+## 📱 Dispositivo probado (pero debería funcionar con otros modelos que usen HyperOS 3.0)
 
 | Campo | Valor |
 |---|---|
