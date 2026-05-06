@@ -43,7 +43,7 @@ $rawPaths = New-Object System.Collections.Generic.List[string]
 if ($PathList -and (Test-Path -LiteralPath $PathList)) {
     foreach ($line in Get-Content -LiteralPath $PathList -Encoding Default) {
         if ($line) {
-            $t = $line.Trim()
+            $t = $line.Trim().Trim('"')  # quitar comillas que agrega el .bat
             if ($t -ne '') { [void]$rawPaths.Add($t) }
         }
     }

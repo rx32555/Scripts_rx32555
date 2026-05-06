@@ -1,20 +1,18 @@
 @echo off
 :: Lanzador para menú "Enviar a" -> Rename-AnimeJellyfin
 :: Soporta selección múltiple de carpetas.
-:: NOTA: delayed expansion desactivada a propósito para preservar
-::       caracteres especiales en rutas (!, ^, &, etc.)
+:: delayed expansion desactivada para preservar ! en rutas.
+:: Paths escritos entre comillas para preservar & y otros caracteres especiales.
 
 :: ---- Ruta absoluta al script PS1 (edítala si mueves los archivos) ----
 set "PS1_PATH=C:\Rename-AnimeJellyfin.ps1"
 
-:: Verificar que el script exista
 if not exist "%PS1_PATH%" (
     echo.
     echo  ERROR: No se encontro el script PS1 en:
     echo    %PS1_PATH%
     echo.
-    echo  Edita la variable PS1_PATH en este .bat para apuntar a la
-    echo  ubicacion correcta del archivo Rename-AnimeJellyfin.ps1
+    echo  Edita la variable PS1_PATH en este .bat
     echo.
     pause
     exit /b 1
@@ -27,7 +25,7 @@ if exist "%TMP_LIST%" del "%TMP_LIST%"
 
 :loop
 if "%~1"=="" goto :run
-echo %~1>> "%TMP_LIST%"
+echo "%~1">> "%TMP_LIST%"
 shift
 goto :loop
 
