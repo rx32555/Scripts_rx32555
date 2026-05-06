@@ -94,7 +94,7 @@ function Invoke-FixName {
 
     # P1 — Espaciado tras SxxExx
     $out = [regex]::Replace($out,
-        '([Ss]\d{1,2}[Ee]\d{2,3})([^\s\.\]\[\(\)\-_])',
+        '([Ss]\d{1,2}[Ee]\d{2,3})([^\s\.\]\(\)\-_])'   # \[ removido: agregar espacio antes de [,
         '$1 $2')
 
     if ($out -match '[Ss]\d{1,2}[Ee]\d{2,3}') {
