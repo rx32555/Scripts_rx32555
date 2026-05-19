@@ -123,6 +123,14 @@ function Invoke-FixName {
         return '{0}S{1:00}E{2:00}{3}' -f $Matches[1], $season, $e, $Matches[3]
     }
 
+    # P5 — Número al final del nombre, sin nada después
+    #   "[Group] Show (720p) 01"  ->  "[Group] Show (720p) S01E01"
+    if ($out -match '^(.*[\s\(].+[\s\(])0*(\d{1,3})\s*$') {
+        $e = [int]$Matches[2]
+        if ($e -ge 1900 -and $e -le 2099) { return $null }
+        return '{0} S{1:00}E{2:00}' -f $Matches[1].TrimEnd(), $season, $e
+    }
+
     return $null
 }
 
@@ -296,7 +304,7 @@ foreach ($currentPath in $pathsToProcess) {
             path      = $currentPath
             ops       = $folderOps.ToArray()
         }
-        $payload | ConvertTo-Json -Depth 4 | Out-File -FilePath $backupPath -Encoding UTF8
+        $payload | ConvertTo-Json -Depth 4 | Out-File -LiteralPath $backupPath -Encoding UTF8
         Write-Host ("  -> Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
     }
     Write-Host ''
