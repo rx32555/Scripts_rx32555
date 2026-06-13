@@ -1,15 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
-title SmartMuxer v8.1
-mode con: cols=110 lines=42
+title SmartMuxer v8.3
+::mode con: cols=110 lines=42
 color 0B
 
 :: ===============================================================================
-::  SMART MUXER v8.1
-::  Cambios vs v8.0:
-::   - ENTER funciona en el countdown final (helper PowerShell para leer teclas).
-::   - Auto-descarga de MKVToolNix si falta mkvmerge.exe.
-::   - Subs con "forced" / "signs" / "songs" en el nombre se marcan como forced.
+::  SMART MUXER v8.3
+::  Cambios vs v8.2:
+::   - Modo Express: presiona ENTER para muxeo automatico sin preguntas.
+::   - Prioridad Automatica de Audios: (jpn > lat > spa > eng) al setear pista por defecto.
 ::
 ::  Arrastra al .bat:  1 .mkv base  +  N adjuntos  (video/audio/sub/font/xml)
 ::  Salida:            <nombre_mkv>_muxed.mkv  (sufijo numerico si ya existe)
@@ -130,8 +129,22 @@ if !MKV_BASE_COUNT! GEQ 2 (
 set "BASE_AUDIO_COUNT=0"
 set "BASE_SUB_COUNT=0"
 for /f "usebackq tokens=*" %%L in (`""%MKVMERGE%" -i "!MKV_BASE!" 2^>nul"`) do (
-    echo %%L | findstr /C:"audio (" >nul && set /a BASE_AUDIO_COUNT+=1
-    echo %%L | findstr /C:"subtitles (" >nul && set /a BASE_SUB_COUNT+=1
+    set "line=%%L"
+    echo !line! | findstr /C:"audio (" >nul
+    if not errorlevel 1 (
+        set /a BASE_AUDIO_COUNT+=1
+        set "rem=!line:*Track ID =!"
+        for /f "delims=:" %%A in ("!rem!") do set "tid=%%A"
+        set "lang=und"
+        echo !rem! | findstr /i "language:" >nul
+        if not errorlevel 1 (
+            set "lang=!rem:*language:=!"
+            for /f "delims= ]" %%A in ("!lang!") do set "lang=%%A"
+        )
+        set "BASE_AUDIO_ID[!BASE_AUDIO_COUNT!]=!tid!"
+        set "BASE_AUDIO_LANG[!BASE_AUDIO_COUNT!]=!lang!"
+    )
+    echo !line! | findstr /C:"subtitles (" >nul && set /a BASE_SUB_COUNT+=1
 )
 
 :: ===============================================================================
@@ -140,7 +153,7 @@ for /f "usebackq tokens=*" %%L in (`""%MKVMERGE%" -i "!MKV_BASE!" 2^>nul"`) do (
 cls
 echo.
 echo ===============================================================================
-echo                       SMART MUXER v8.1  -  RESUMEN
+echo                       SMART MUXER v8.3  -  RESUMEN
 echo ===============================================================================
 echo.
 for %%F in ("!MKV_BASE!") do set "MKV_BASE_NAME=%%~nxF"
@@ -190,20 +203,32 @@ if !TOTAL_PROC! EQU 0 (
     pause & exit /b 1
 )
 
-echo ===============================================================================
-choice /C SN /N /M "  Continuar con la seleccion paso a paso? [S/N] "
-if errorlevel 2 exit /b
+set "_MODE=E"
 
-:: ===============================================================================
-::  5) Pipeline de seleccion
-:: ===============================================================================
-set "SEL_VIDEO="
-set "SEL_AUDIOS="
-set "SEL_SUBS="
-set "SEL_FONTS="
-set "SEL_CAPS="
-set "REPLACE_AUDIO=0"
-set "REPLACE_SUBS=0"
+if /i "!_MODE!"=="E" (
+    if !VIDEO_COUNT! GEQ 1 set "SEL_VIDEO=!VIDEO[1]!"
+    if !AUDIO_COUNT! GEQ 1 (
+        for /L %%i in (1,1,!AUDIO_COUNT!) do (
+            if defined SEL_AUDIOS (set "SEL_AUDIOS=!SEL_AUDIOS! %%i") else (set "SEL_AUDIOS=%%i")
+            call :DETECT_LANG "!AUDIO[%%i]!" _detected _ext
+            set "AUDIO_LANG[%%i]=!_detected!"
+            set "AUDIO_EXT[%%i]=!_ext!"
+        )
+    )
+    if !SUB_COUNT! GEQ 1 (
+        for /L %%i in (1,1,!SUB_COUNT!) do (
+            if defined SEL_SUBS (set "SEL_SUBS=!SEL_SUBS! %%i") else (set "SEL_SUBS=%%i")
+            call :DETECT_LANG "!SUB[%%i]!" _detected _ext
+            call :DETECT_FORCED "!SUB[%%i]!" _forced
+            set "SUB_LANG[%%i]=!_detected!"
+            set "SUB_EXT[%%i]=!_ext!"
+            set "SUB_FORCED[%%i]=!_forced!"
+        )
+    )
+    if !FONT_COUNT! GEQ 1 set "SEL_FONTS=1"
+    if !CAPS_COUNT! GEQ 1 set "SEL_CAPS=!CAPS[1]!"
+    goto :EVAL_AUDIO_PRIO
+)
 
 if !VIDEO_COUNT! GEQ 1 call :SELECT_SINGLE VIDEO "fuente de video (reemplaza el video del mkv)" SEL_VIDEO
 
@@ -249,14 +274,81 @@ if !FONT_COUNT! GEQ 1 (
     echo ===============================================================================
     echo  FONTS detectadas: !FONT_COUNT!
     echo ===============================================================================
-    for /L %%i in (1,1,!FONT_COUNT!) do for %%F in ("!FONT[%%i]!") do echo    - %%~nxF
+    if !FONT_COUNT! LEQ 15 (
+        for /L %%i in (1,1,!FONT_COUNT!) do for %%F in ("!FONT[%%i]!") do echo    - %%~nxF
+    ) else (
+        for /L %%i in (1,1,10) do for %%F in ("!FONT[%%i]!") do echo    - %%~nxF
+        set /a _resto=FONT_COUNT-10
+        echo    ... y !_resto! fuentes mas.
+    )
     echo.
     choice /C SN /N /M "  Adjuntar todas las fonts al mkv? [S/N] "
-    if errorlevel 1 set "SEL_FONTS=1"
-    if errorlevel 2 set "SEL_FONTS="
+    if "!errorlevel!"=="1" set "SEL_FONTS=1"
+    if "!errorlevel!"=="2" set "SEL_FONTS="
 )
 
 if !CAPS_COUNT! GEQ 1 call :SELECT_SINGLE CAPS "archivo de capitulos (reemplaza los existentes)" SEL_CAPS
+
+:EVAL_AUDIO_PRIO
+:: Evaluacion Audio
+set "_best_audio_prio=99"
+set "_default_audio_type="
+set "_default_audio_idx="
+
+if "!REPLACE_AUDIO!" NEQ "1" if !BASE_AUDIO_COUNT! GEQ 1 (
+    for /L %%i in (1,1,!BASE_AUDIO_COUNT!) do (
+        set "lang=!BASE_AUDIO_LANG[%%i]!"
+        set "prio=99"
+        if /i "!lang!"=="eng" set "prio=4"
+        if /i "!lang!"=="en"  set "prio=4"
+        if /i "!lang!"=="spa" set "prio=3"
+        if /i "!lang!"=="es"  set "prio=3"
+        if /i "!lang!"=="es-es" set "prio=3"
+        if /i "!lang!"=="lat" set "prio=2"
+        if /i "!lang!"=="es-419" set "prio=2"
+        if /i "!lang!"=="jpn" set "prio=1"
+        if /i "!lang!"=="ja"  set "prio=1"
+        
+        if !prio! LSS !_best_audio_prio! (
+            set "_best_audio_prio=!prio!"
+            set "_default_audio_type=BASE"
+            set "_default_audio_idx=%%i"
+        )
+    )
+)
+
+if defined SEL_AUDIOS (
+    for %%i in (!SEL_AUDIOS!) do (
+        set "ext=!AUDIO_EXT[%%i]!"
+        set "lang=!AUDIO_LANG[%%i]!"
+        set "prio=99"
+        
+        if /i "!lang!"=="eng" set "prio=4"
+        if /i "!lang!"=="en"  set "prio=4"
+        if /i "!lang!"=="spa" set "prio=3"
+        if /i "!lang!"=="es"  set "prio=3"
+        
+        if /i "!ext!"=="en"     set "prio=4"
+        if /i "!ext!"=="eng"    set "prio=4"
+        if /i "!ext!"=="es"     set "prio=3"
+        if /i "!ext!"=="spa"    set "prio=3"
+        if /i "!ext!"=="esp"    set "prio=3"
+        if /i "!ext!"=="es-es"  set "prio=3"
+        if /i "!ext!"=="lat"    set "prio=2"
+        if /i "!ext!"=="es-419" set "prio=2"
+        
+        if /i "!lang!"=="jpn" set "prio=1"
+        if /i "!lang!"=="ja"  set "prio=1"
+        if /i "!ext!"=="jpn"  set "prio=1"
+        if /i "!ext!"=="jp"   set "prio=1"
+        
+        if !prio! LSS !_best_audio_prio! (
+            set "_best_audio_prio=!prio!"
+            set "_default_audio_type=NEW"
+            set "_default_audio_idx=%%i"
+        )
+    )
+)
 
 :: ===============================================================================
 ::  6) Confirmacion final con ENTER funcional
@@ -264,7 +356,7 @@ if !CAPS_COUNT! GEQ 1 call :SELECT_SINGLE CAPS "archivo de capitulos (reemplaza 
 cls
 echo.
 echo ===============================================================================
-echo                  SMART MUXER v8.1  -  CONFIRMACION FINAL
+echo                  SMART MUXER v8.3  -  CONFIRMACION FINAL
 echo ===============================================================================
 echo.
 echo  MKV BASE:  !MKV_BASE_NAME!
@@ -306,8 +398,7 @@ echo  SALIDA:    !OUTPUT_NAME!
 echo.
 echo ===============================================================================
 
-:: Aqui esta el fix: PowerShell helper acepta ENTER, Y, o X
-call :TIMED_CONFIRM 15 _FINAL_KEY
+call :TIMED_CONFIRM_FINAL 15 _FINAL_KEY
 if /i "!_FINAL_KEY!"=="X" (
     echo.
     echo  Cancelado por el usuario.
@@ -324,54 +415,116 @@ echo [PROCESANDO] Ejecutando mkvmerge...
 echo --------------------------------------------------------------------------------
 echo.
 
-set "BASE_FLAGS="
-if defined SEL_VIDEO              set "BASE_FLAGS=!BASE_FLAGS! --no-video"
-if "!REPLACE_AUDIO!"=="1"         set "BASE_FLAGS=!BASE_FLAGS! --no-audio"
-if "!REPLACE_SUBS!"=="1"          set "BASE_FLAGS=!BASE_FLAGS! --no-subtitles"
-if defined SEL_CAPS               set "BASE_FLAGS=!BASE_FLAGS! --no-chapters"
+set "MKVMERGE_ARGS=%TEMP%\_smartmuxer_args.json"
+if exist "!MKVMERGE_ARGS!" del "!MKVMERGE_ARGS!" >nul 2>&1
 
-set "VIDEO_ARG="
-if defined SEL_VIDEO set VIDEO_ARG="!SEL_VIDEO!"
+set "_first_json=1"
+>>"!MKVMERGE_ARGS!" echo([
 
-set "AUDIO_CMD="
+call :ADD_JSON_ARG "-o"
+call :ADD_JSON_ARG "!OUTPUT_FILE!"
+call :ADD_JSON_ARG "--no-global-tags"
+call :ADD_JSON_ARG "--no-track-tags"
+
+if defined SEL_VIDEO              call :ADD_JSON_ARG "--no-video"
+if "!REPLACE_AUDIO!"=="1"         call :ADD_JSON_ARG "--no-audio"
+if "!REPLACE_SUBS!"=="1"          call :ADD_JSON_ARG "--no-subtitles"
+if defined SEL_CAPS               call :ADD_JSON_ARG "--no-chapters"
+
+if "!REPLACE_AUDIO!" NEQ "1" if !BASE_AUDIO_COUNT! GEQ 1 (
+    for /L %%i in (1,1,!BASE_AUDIO_COUNT!) do (
+        set "tid=!BASE_AUDIO_ID[%%i]!"
+        set "_def=no"
+        if "!_default_audio_type!"=="BASE" if "!_default_audio_idx!"=="%%i" set "_def=yes"
+        call :ADD_JSON_ARG "--default-track"
+        call :ADD_JSON_ARG "!tid!:!_def!"
+    )
+)
+
+call :ADD_JSON_ARG "!MKV_BASE!"
+
+if defined SEL_VIDEO (
+    call :ADD_JSON_ARG "!SEL_VIDEO!"
+)
+
 if defined SEL_AUDIOS (
-    set "_first_audio=1"
     for %%i in (!SEL_AUDIOS!) do (
         set "_def=no"
-        if "!REPLACE_AUDIO!"=="1" if "!_first_audio!"=="1" set "_def=yes"
-        set AUDIO_CMD=!AUDIO_CMD! --language 0:!AUDIO_LANG[%%i]! --default-track 0:!_def! "!AUDIO[%%i]!"
-        set "_first_audio=0"
+        if "!_default_audio_type!"=="NEW" if "!_default_audio_idx!"=="%%i" set "_def=yes"
+        call :ADD_JSON_ARG "--language"
+        call :ADD_JSON_ARG "0:!AUDIO_LANG[%%i]!"
+        call :ADD_JSON_ARG "--default-track"
+        call :ADD_JSON_ARG "0:!_def!"
+        call :ADD_JSON_ARG "!AUDIO[%%i]!"
     )
 )
 
-set "SUB_CMD="
 if defined SEL_SUBS (
-    set "_first_sub=1"
+    set "_default_sub_idx="
+    set "_best_sub_prio=99"
+    for %%i in (!SEL_SUBS!) do (
+        set "subext=!SUB_EXT[%%i]!"
+        set "prio=99"
+        if /i "!subext!"=="en"     set "prio=3"
+        if /i "!subext!"=="eng"    set "prio=3"
+        if /i "!subext!"=="es"     set "prio=2"
+        if /i "!subext!"=="spa"    set "prio=2"
+        if /i "!subext!"=="esp"    set "prio=2"
+        if /i "!subext!"=="es-es"  set "prio=2"
+        if /i "!subext!"=="lat"    set "prio=1"
+        if /i "!subext!"=="es-419" set "prio=1"
+        
+        if !prio! LSS !_best_sub_prio! (
+            set "_best_sub_prio=!prio!"
+            set "_default_sub_idx=%%i"
+        )
+    )
+    if "!_best_sub_prio!"=="99" (
+        if "!REPLACE_SUBS!"=="1" (
+            for %%i in (!SEL_SUBS!) do (
+                if not defined _default_sub_idx set "_default_sub_idx=%%i"
+            )
+        )
+    )
     for %%i in (!SEL_SUBS!) do (
         set "_def=no"
-        if "!REPLACE_SUBS!"=="1" if "!_first_sub!"=="1" set "_def=yes"
+        if "%%i"=="!_default_sub_idx!" set "_def=yes"
         set "_forced=no"
         if "!SUB_FORCED[%%i]!"=="1" set "_forced=yes"
-        set SUB_CMD=!SUB_CMD! --language 0:!SUB_LANG[%%i]! --default-track 0:!_def! --forced-track 0:!_forced! "!SUB[%%i]!"
-        set "_first_sub=0"
+        call :ADD_JSON_ARG "--language"
+        call :ADD_JSON_ARG "0:!SUB_LANG[%%i]!"
+        call :ADD_JSON_ARG "--default-track"
+        call :ADD_JSON_ARG "0:!_def!"
+        call :ADD_JSON_ARG "--forced-track"
+        call :ADD_JSON_ARG "0:!_forced!"
+        call :ADD_JSON_ARG "!SUB[%%i]!"
     )
 )
 
-set "FONT_CMD="
 if defined SEL_FONTS (
     for /L %%i in (1,1,!FONT_COUNT!) do (
-        set FONT_CMD=!FONT_CMD! --attach-file "!FONT[%%i]!"
+        set "font_path=!FONT[%%i]!"
+        call :GET_FONT_MIME "!font_path!" _mime
+        call :ADD_JSON_ARG "--attachment-mime-type"
+        call :ADD_JSON_ARG "!_mime!"
+        call :ADD_JSON_ARG "--attach-file"
+        call :ADD_JSON_ARG "!font_path!"
     )
 )
 
-set "CAPS_CMD="
-if defined SEL_CAPS set CAPS_CMD=--chapters "!SEL_CAPS!"
+if defined SEL_CAPS (
+    call :ADD_JSON_ARG "--chapters"
+    call :ADD_JSON_ARG "!SEL_CAPS!"
+)
 
-"%MKVMERGE%" -o "!OUTPUT_FILE!" --no-global-tags --no-track-tags !BASE_FLAGS! "!MKV_BASE!" !VIDEO_ARG! !AUDIO_CMD! !SUB_CMD! !FONT_CMD! !CAPS_CMD!
+>>"!MKVMERGE_ARGS!" echo(]
+
+"%MKVMERGE%" @"!MKVMERGE_ARGS!"
 set "MKV_EXIT=!errorlevel!"
 
 :: Limpiar helpers temporales
 if exist "%TMP_PS_TIMER%" del "%TMP_PS_TIMER%" >nul 2>&1
+if exist "!MKVMERGE_ARGS!" del "!MKVMERGE_ARGS!" >nul 2>&1
 
 echo.
 if !MKV_EXIT! EQU 0 (
@@ -454,7 +607,7 @@ if /i "!subext!"=="kor"    set "lang=kor"
 if /i "!subext!"=="ar"     set "lang=ara"
 if /i "!subext!"=="ara"    set "lang=ara"
 
-endlocal & set "%~2=%lang%"
+endlocal & set "%~2=%lang%" & if "%~3" NEQ "" set "%~3=%subext%"
 exit /b
 
 :DETECT_FORCED <filepath> <outVar>
@@ -530,7 +683,7 @@ echo.
 choice /C SN /N /M "  Anadir esta pista? [S/N] "
 if errorlevel 2 exit /b
 
-call :DETECT_LANG "!fpath!" _detected
+call :DETECT_LANG "!fpath!" _detected _detected_ext
 if /i "!_detected!"=="und" call :ASK_LANG _detected
 
 if /i "!pref!"=="AUDIO" (
@@ -539,6 +692,7 @@ if /i "!pref!"=="AUDIO" (
 ) else (
     if defined SEL_SUBS (set "SEL_SUBS=!SEL_SUBS! !idx!") else (set "SEL_SUBS=!idx!")
     set "SUB_LANG[!idx!]=!_detected!"
+    set "SUB_EXT[!idx!]=!_detected_ext!"
     set "SUB_FORCED[!idx!]=!_forced!"
 )
 exit /b
@@ -610,15 +764,32 @@ exit /b
 :: ===============================================================================
 ::  Helper: TIMED_CONFIRM con ENTER (genera y ejecuta script PowerShell)
 :: ===============================================================================
-:TIMED_CONFIRM <timeoutSecs> <outVar>
-:: Devuelve "Y" si ENTER/Y o timeout. Devuelve "X" si X.
-call :WRITE_PS_TIMER
-for /f "delims=" %%K in ('powershell -nop -ExecutionPolicy Bypass -File "%TMP_PS_TIMER%" %~1') do set "_TC_RES=%%K"
-set "%~2=%_TC_RES%"
+:TIMED_CONFIRM_EXPRESS <timeoutSecs> <outVar>
+> "%TMP_PS_TIMER%" echo param^([double]$t^)
+>> "%TMP_PS_TIMER%" echo $c = ''
+>> "%TMP_PS_TIMER%" echo $start = Get-Date
+>> "%TMP_PS_TIMER%" echo while ^($true^) {
+>> "%TMP_PS_TIMER%" echo     $elapsed = ^(^(Get-Date^) - $start^).TotalSeconds
+>> "%TMP_PS_TIMER%" echo     $remaining = $t - $elapsed
+>> "%TMP_PS_TIMER%" echo     if ^($remaining -le 0^) { $c = 'E'; break }
+>> "%TMP_PS_TIMER%" echo     $secs = [int][Math]::Ceiling^($remaining^)
+>> "%TMP_PS_TIMER%" echo     $msg = "  Auto-inicio en {0,2}s   [ENTER = Express   P = Personalizado   X = Cancelar]   " -f $secs
+>> "%TMP_PS_TIMER%" echo     [Console]::Error.Write^([char]13 + $msg^)
+>> "%TMP_PS_TIMER%" echo     if ^([Console]::KeyAvailable^) {
+>> "%TMP_PS_TIMER%" echo         $k = [Console]::ReadKey^($true^)
+>> "%TMP_PS_TIMER%" echo         if ^($k.Key -eq 'Enter'^) { $c = 'E'; break }
+>> "%TMP_PS_TIMER%" echo         if ^($k.KeyChar -eq 'E' -or $k.KeyChar -eq 'e'^) { $c = 'E'; break }
+>> "%TMP_PS_TIMER%" echo         if ^($k.KeyChar -eq 'P' -or $k.KeyChar -eq 'p'^) { $c = 'P'; break }
+>> "%TMP_PS_TIMER%" echo         if ^($k.KeyChar -eq 'X' -or $k.KeyChar -eq 'x'^) { $c = 'X'; break }
+>> "%TMP_PS_TIMER%" echo     }
+>> "%TMP_PS_TIMER%" echo     Start-Sleep -Milliseconds 100
+>> "%TMP_PS_TIMER%" echo }
+>> "%TMP_PS_TIMER%" echo [Console]::Error.WriteLine^(^)
+>> "%TMP_PS_TIMER%" echo Write-Output $c
+for /f "delims=" %%K in ('powershell -nop -ExecutionPolicy Bypass -File "%TMP_PS_TIMER%" %~1') do set "%~2=%%K"
 exit /b
 
-:WRITE_PS_TIMER
-:: Escribe el script .ps1 helper. Se regenera siempre (es chico).
+:TIMED_CONFIRM_FINAL <timeoutSecs> <outVar>
 > "%TMP_PS_TIMER%" echo param^([double]$t^)
 >> "%TMP_PS_TIMER%" echo $c = ''
 >> "%TMP_PS_TIMER%" echo $start = Get-Date
@@ -627,7 +798,7 @@ exit /b
 >> "%TMP_PS_TIMER%" echo     $remaining = $t - $elapsed
 >> "%TMP_PS_TIMER%" echo     if ^($remaining -le 0^) { $c = 'Y'; break }
 >> "%TMP_PS_TIMER%" echo     $secs = [int][Math]::Ceiling^($remaining^)
->> "%TMP_PS_TIMER%" echo     $msg = "  Auto-inicio en {0,2}s   [ENTER/Y = Procesar   X = Cancelar]   " -f $secs
+>> "%TMP_PS_TIMER%" echo     $msg = "  Auto-inicio en {0,2}s   [ENTER = Confirmar   X = Cancelar]   " -f $secs
 >> "%TMP_PS_TIMER%" echo     [Console]::Error.Write^([char]13 + $msg^)
 >> "%TMP_PS_TIMER%" echo     if ^([Console]::KeyAvailable^) {
 >> "%TMP_PS_TIMER%" echo         $k = [Console]::ReadKey^($true^)
@@ -639,6 +810,7 @@ exit /b
 >> "%TMP_PS_TIMER%" echo }
 >> "%TMP_PS_TIMER%" echo [Console]::Error.WriteLine^(^)
 >> "%TMP_PS_TIMER%" echo Write-Output $c
+for /f "delims=" %%K in ('powershell -nop -ExecutionPolicy Bypass -File "%TMP_PS_TIMER%" %~1') do set "%~2=%%K"
 exit /b
 
 :: ===============================================================================
@@ -648,7 +820,7 @@ exit /b
 cls
 echo.
 echo ===============================================================================
-echo                       SMART MUXER v8.1
+echo                       SMART MUXER v8.3
 echo                    Falta dependencia: mkvmerge.exe
 echo ===============================================================================
 echo.
@@ -771,7 +943,7 @@ exit /b
 cls
 echo.
 echo ===============================================================================
-echo                     SMART MUXER v8.1  -  AYUDA
+echo                     SMART MUXER v8.2  -  AYUDA
 echo ===============================================================================
 echo.
 echo   USO:  Arrastra JUNTOS los archivos sobre este .bat:
@@ -799,4 +971,31 @@ echo   SALIDA:  ^<nombre_mkv^>_muxed.mkv en la misma carpeta del mkv.
 echo.
 echo ===============================================================================
 pause
+exit /b
+
+:GET_FONT_MIME <filepath> <outVar>
+setlocal enabledelayedexpansion
+set "fp=%~1"
+set "ext="
+for %%F in ("!fp!") do set "ext=%%~xF"
+if defined ext set "ext=!ext:~1!"
+set "mime=application/x-truetype-font"
+if /i "!ext!"=="otf" set "mime=application/vnd.ms-opentype"
+if /i "!ext!"=="ttc" set "mime=application/x-truetype-font-collection"
+if /i "!ext!"=="woff" set "mime=font/woff"
+if /i "!ext!"=="woff2" set "mime=font/woff2"
+endlocal & set "%~2=%mime%"
+exit /b
+
+:ADD_JSON_ARG
+setlocal enabledelayedexpansion
+set "val=%~1"
+set "val=!val:\=\\!"
+set "val=!val:"=\"!"
+if "!_first_json!"=="1" (
+    >>"!MKVMERGE_ARGS!" echo(  "!val!"
+) else (
+    >>"!MKVMERGE_ARGS!" echo(, "!val!"
+)
+endlocal & set "_first_json=0"
 exit /b
