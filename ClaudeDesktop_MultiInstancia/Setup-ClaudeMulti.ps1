@@ -1,0 +1,609 @@
+<#
+.SYNOPSIS
+    Configura Claude Desktop para correr dos (o mas) instancias aisladas en el mismo PC,
+    cada una con su propia cuenta, sesion, MCPs y configuracion.
+
+.DESCRIPTION
+    Claude Desktop es una app Electron. Electron guarda TODO el estado de usuario
+    (token de sesion, configuracion, MCPs, cache) en una carpeta "user data".
+    Si se lanza el ejecutable con --user-data-dir="ruta", esa instancia usa una
+    carpeta distinta y por lo tanto es una sesion completamente independiente.
+
+    Este script:
+      1. Detecta donde esta instalado Claude Desktop.
+      2. Si la instalacion es MSIX (Microsoft Store / WindowsApps), hace una copia
+         portable a una carpeta normal, porque Windows bloquea ejecutar el .exe
+         desde WindowsApps con parametros.
+      3. Crea un acceso directo por perfil en el Escritorio.
+
+    En instalaciones MSIX el PRIMER perfil se lanza a traves del paquete de la
+    Store (no de la copia portable), asi conserva las auto-actualizaciones.
+
+.PARAMETER Profiles
+    Nombres de los perfiles. El PRIMERO usa la carpeta de datos por defecto
+    (%APPDATA%\Claude), asi conservas la sesion y los MCPs que ya tienes.
+    Los siguientes usan %APPDATA%\Claude-<Nombre>.
+
+.PARAMETER PortableDir
+    Carpeta destino de la copia portable (solo se usa en instalaciones MSIX).
+
+.PARAMETER CopyMcpConfig
+    Copia el nodo mcpServers de claude_desktop_config.json del perfil por defecto
+    a cada perfil nuevo. Solo esa clave: no copia sesion, credenciales ni las
+    preferencias de UI ligadas a tu cuenta que viven en el mismo archivo.
+
+.PARAMETER GrantWindowsAppsRead
+    Autoriza sin preguntar el takeown+icacls sobre la carpeta del paquete MSIX,
+    para escenarios desatendidos. Solo se usa si la copia falla por permisos.
+
+.PARAMETER Revert
+    Deshace la configuracion: borra los accesos directos, las carpetas de datos
+    de los perfiles extra y la copia portable. Nunca toca %APPDATA%\Claude.
+
+.PARAMETER Force
+    Rehace la copia portable si ya existe, sobrescribe la config MCP ya copiada
+    y, con -Revert, borra sin pedir confirmacion.
+
+.EXAMPLE
+    .\Setup-ClaudeMulti.ps1
+
+.EXAMPLE
+    .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo','Cliente' -CopyMcpConfig
+
+.EXAMPLE
+    .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo' -Revert
+#>
+
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+param(
+    [string[]]$Profiles    = @('Cuenta1', 'Cuenta2'),
+    [string]  $PortableDir = 'C:\ClaudePortable',
+    [switch]  $CopyMcpConfig,
+    [switch]  $GrantWindowsAppsRead,
+    [switch]  $Revert,
+    [switch]  $Force
+)
+
+$ErrorActionPreference = 'Stop'
+
+# ---------------------------------------------------------------- helpers ---
+
+function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan }
+function Write-Ok   { param([string]$m) Write-Host "    [ok]   $m" -ForegroundColor Green }
+function Write-Note { param([string]$m) Write-Host "    ->     $m" -ForegroundColor Gray }
+function Write-Warn { param([string]$m) Write-Host "    [!]    $m" -ForegroundColor Yellow }
+function Write-Err  { param([string]$m) Write-Host "    [X]    $m" -ForegroundColor Red }
+
+function Test-Admin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Convierte "1.10.0", "app-1.9.0-beta", "1.26832.0.0" a [version] comparable.
+# Evita el orden lexicografico, que pone 1.9.0 por encima de 1.10.0.
+function ConvertTo-SafeVersion {
+    param([string]$Text)
+
+    $zero  = [version]'0.0.0.0'
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $zero }
+
+    $clean = ($Text -replace '^[^0-9]*', '') -replace '[^0-9\.].*$', ''
+    $clean = $clean.Trim('.')
+    if ([string]::IsNullOrWhiteSpace($clean) -or $clean -notmatch '\.') { $clean = "$clean.0" }
+
+    $parsed = $zero
+    if ([version]::TryParse($clean, [ref]$parsed)) { return $parsed }
+    return $zero
+}
+
+# Valida nombres de perfil: se usan como nombre de archivo (.lnk) y de carpeta.
+function Assert-ProfileNames {
+    param([string[]]$Names)
+
+    if (-not $Names -or $Names.Count -eq 0) {
+        throw 'La lista de perfiles esta vacia.'
+    }
+
+    $bad = [IO.Path]::GetInvalidFileNameChars()
+    foreach ($n in $Names) {
+        if ([string]::IsNullOrWhiteSpace($n)) {
+            throw 'Hay un nombre de perfil vacio en -Profiles.'
+        }
+        if ($n.IndexOfAny($bad) -ge 0) {
+            throw "El nombre de perfil '$n' contiene caracteres no validos para un archivo o carpeta."
+        }
+        if ($n -ne $n.Trim() -or $n.EndsWith('.')) {
+            throw "El nombre de perfil '$n' no puede empezar/terminar en espacio ni terminar en punto."
+        }
+    }
+
+    $dupes = $Names | Group-Object -Property { $_.ToLowerInvariant() } |
+             Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Group[0] }
+    if ($dupes) {
+        throw "Hay nombres de perfil repetidos: $($dupes -join ', ')"
+    }
+
+    if ($Names.Count -lt 2 -and -not $Revert) {
+        Write-Warn 'Solo se indico un perfil: no se crea ninguna instancia adicional.'
+    }
+}
+
+function Get-ClaudeInstall {
+    # --- 1. Instalacion clasica (installer .exe, tipo Squirrel) --------------
+    $bases = @($env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)}) |
+             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $roots = @()
+    foreach ($b in $bases) {
+        $roots += (Join-Path $b 'AnthropicClaude')
+        $roots += (Join-Path $b 'Claude')
+    }
+    $roots = $roots | Where-Object { Test-Path $_ } | Select-Object -Unique
+
+    foreach ($root in $roots) {
+        $direct = Join-Path $root 'claude.exe'
+        if (Test-Path $direct) {
+            return [pscustomobject]@{ Exe = $direct; Dir = $root; Mode = 'Direct'; Aumid = $null }
+        }
+        # Ordenar por version real, no por nombre: app-1.10.0 > app-1.9.0
+        $appDirs = Get-ChildItem -LiteralPath $root -Directory -Filter 'app-*' `
+                     -ErrorAction SilentlyContinue |
+                   Sort-Object -Property @{ Expression = { ConvertTo-SafeVersion $_.Name } } -Descending
+        foreach ($d in $appDirs) {
+            $exe = Join-Path $d.FullName 'claude.exe'
+            if (Test-Path $exe) {
+                return [pscustomobject]@{ Exe = $exe; Dir = $d.FullName; Mode = 'Direct'; Aumid = $null }
+            }
+        }
+    }
+
+    # --- 2. Instalacion MSIX (Microsoft Store) ------------------------------
+    if (-not (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue)) {
+        Write-Warn 'Get-AppxPackage no esta disponible en esta edicion de PowerShell.'
+        Write-Note 'No se puede detectar una instalacion de Microsoft Store desde aqui.'
+        Write-Note 'Vuelve a ejecutar con Windows PowerShell 5.1:'
+        Write-Note '  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1'
+        return $null
+    }
+
+    $pkg = Get-AppxPackage -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -match 'Claude' -or $_.Publisher -match 'Anthropic' } |
+           Sort-Object -Property @{ Expression = { ConvertTo-SafeVersion $_.Version } } -Descending |
+           Select-Object -First 1
+
+    if ($pkg -and $pkg.InstallLocation) {
+        $aumid = $null
+        try {
+            $appId = (Get-AppxPackageManifest $pkg).Package.Applications.Application.Id |
+                     Select-Object -First 1
+            if ($appId) { $aumid = "$($pkg.PackageFamilyName)!$appId" }
+        } catch { }
+
+        $exe = Get-ChildItem -LiteralPath $pkg.InstallLocation -Filter 'claude.exe' `
+                 -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        return [pscustomobject]@{
+            Exe   = $(if ($exe) { $exe.FullName } else { $null })
+            Dir   = $pkg.InstallLocation
+            Mode  = 'Msix'
+            Aumid = $aumid
+        }
+    }
+
+    return $null
+}
+
+function New-ClaudeShortcut {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Target,
+        [string]$Arguments   = '',
+        [string]$IconPath,
+        [string]$Description = 'Claude Desktop'
+    )
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    $path    = Join-Path $desktop "$Name.lnk"
+
+    if (Test-Path -LiteralPath $path) {
+        Write-Warn "Ya existia '$Name.lnk' en el Escritorio: se sobrescribe."
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($path, 'Crear acceso directo')) { return $path }
+
+    $shell = $null
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $lnk   = $shell.CreateShortcut($path)
+        $lnk.TargetPath       = $Target
+        $lnk.WorkingDirectory = Split-Path -Parent $Target
+        $lnk.Arguments        = $Arguments
+        $lnk.Description      = $Description
+        if ($IconPath) { $lnk.IconLocation = "$IconPath,0" }
+        $lnk.Save()
+    }
+    finally {
+        if ($shell) {
+            [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+        }
+    }
+    return $path
+}
+
+function Copy-ToPortable {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination,
+        [switch]$Overwrite
+    )
+
+    if ((Test-Path $Destination) -and -not $Overwrite) {
+        Write-Warn "Ya existe $Destination. Usa -Force para rehacer la copia."
+        Write-Note 'Se reutilizara la copia existente.'
+        return
+    }
+    if (Test-Path $Destination) {
+        if ($PSCmdlet.ShouldProcess($Destination, 'Borrar copia portable anterior')) {
+            Write-Note 'Borrando copia anterior...'
+            Remove-Item -LiteralPath $Destination -Recurse -Force
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($Destination, "Copiar Claude Desktop desde $Source")) { return }
+
+    Write-Note "Copiando $Source"
+    Write-Note "     ->  $Destination"
+    # /XJ: no seguir junctions ni enlaces duros, que los paquetes MSIX si usan.
+    $null = robocopy $Source $Destination /E /XJ /COPY:DAT /DCOPY:DA /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+    $rc = $LASTEXITCODE
+    # robocopy usa 0-7 como exito (1 = se copiaron archivos). Se normaliza para
+    # que el codigo de salida del script no herede un "1" que parece error.
+    $global:LASTEXITCODE = 0
+    if ($rc -ge 8) {
+        throw "robocopy fallo (codigo $rc). Probablemente por permisos de WindowsApps."
+    }
+}
+
+function Copy-McpConfig {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string]$DestinationDir,
+        [switch]$Overwrite
+    )
+
+    $srcDir = Join-Path $env:APPDATA 'Claude'
+    $src    = Join-Path $srcDir 'claude_desktop_config.json'
+    if (-not (Test-Path -LiteralPath $src)) {
+        Write-Warn "No hay claude_desktop_config.json en $srcDir; no se copian MCPs."
+        return
+    }
+
+    # claude_desktop_config.json mezcla los MCP servers con preferencias de UI
+    # ligadas a la cuenta. Se extrae SOLO el nodo mcpServers para no arrastrar
+    # ajustes de una cuenta a otra.
+    try {
+        $srcJson = Get-Content -LiteralPath $src -Raw | ConvertFrom-Json
+    }
+    catch {
+        Write-Warn "No se pudo leer $src como JSON; no se copian MCPs."
+        return
+    }
+
+    $servers = $null
+    if ($srcJson.PSObject.Properties.Name -contains 'mcpServers') { $servers = $srcJson.mcpServers }
+    $names = @()
+    if ($servers) { $names = @($servers.PSObject.Properties.Name) }
+
+    if ($names.Count -eq 0) {
+        Write-Note 'Tu perfil actual no tiene MCP servers configurados: no hay nada que copiar.'
+        return
+    }
+
+    $dst = Join-Path $DestinationDir 'claude_desktop_config.json'
+    if ((Test-Path -LiteralPath $dst) -and -not $Overwrite) {
+        Write-Note "Ya hay config MCP en $DestinationDir (usa -Force para sobrescribir)."
+        return
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($dst, "Copiar $($names.Count) MCP server(s)")) { return }
+
+    # Si el destino ya tiene config, se conserva y solo se reemplaza mcpServers.
+    $out = [pscustomobject]@{}
+    if (Test-Path -LiteralPath $dst) {
+        try { $out = Get-Content -LiteralPath $dst -Raw | ConvertFrom-Json } catch { $out = [pscustomobject]@{} }
+    }
+    if ($out.PSObject.Properties.Name -contains 'mcpServers') { $out.mcpServers = $servers }
+    else { $out | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue $servers }
+
+    # Sin BOM: el parser JSON de la app no lo tolera.
+    $json = $out | ConvertTo-Json -Depth 32
+    [IO.File]::WriteAllText($dst, $json, (New-Object Text.UTF8Encoding($false)))
+    Write-Note "MCPs copiados ($($names -join ', ')) -> $dst"
+}
+
+function Get-ProfileLabel {
+    param([string]$Name, [int]$Index)
+    if ($Index -eq 0) { return "Claude - $Name (perfil actual)" }
+    return "Claude - $Name"
+}
+
+function Invoke-Revert {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string[]]$Names,
+        [Parameter(Mandatory)][string]$PortablePath,
+        [switch]$SkipConfirm
+    )
+
+    $desktop = [Environment]::GetFolderPath('Desktop')
+
+    Write-Step 'Borrando accesos directos...'
+    foreach ($n in $Names) {
+        foreach ($label in @("Claude - $n (perfil actual)", "Claude - $n")) {
+            $lnk = Join-Path $desktop "$label.lnk"
+            if (Test-Path -LiteralPath $lnk) {
+                if ($PSCmdlet.ShouldProcess($lnk, 'Eliminar acceso directo')) {
+                    Remove-Item -LiteralPath $lnk -Force
+                    Write-Ok "Borrado: $label.lnk"
+                }
+            }
+        }
+    }
+
+    # El primer perfil usa %APPDATA%\Claude, que NUNCA se toca.
+    Write-Step 'Borrando carpetas de datos de los perfiles extra...'
+    $dataDirs = @()
+    foreach ($n in ($Names | Select-Object -Skip 1)) {
+        $d = Join-Path $env:APPDATA "Claude-$n"
+        if (Test-Path -LiteralPath $d) { $dataDirs += $d }
+    }
+
+    if ($dataDirs.Count -eq 0) {
+        Write-Note 'No hay carpetas de perfiles extra que borrar.'
+    }
+    else {
+        $go = $SkipConfirm
+        if (-not $go) {
+            $list = ($dataDirs -join "`n      ")
+            $go = $PSCmdlet.ShouldContinue(
+                "Se van a borrar estas carpetas y con ellas la sesion y los MCPs de esos perfiles:`n      $list`n`nContinuar?",
+                'Borrar datos de perfiles')
+        }
+        if ($go) {
+            foreach ($d in $dataDirs) {
+                if ($PSCmdlet.ShouldProcess($d, 'Eliminar carpeta de datos del perfil')) {
+                    Remove-Item -LiteralPath $d -Recurse -Force
+                    Write-Ok "Borrado: $d"
+                }
+            }
+        }
+        else {
+            Write-Note 'Carpetas de datos conservadas.'
+        }
+    }
+
+    Write-Step 'Borrando la copia portable...'
+    if (Test-Path -LiteralPath $PortablePath) {
+        if ($PSCmdlet.ShouldProcess($PortablePath, 'Eliminar copia portable')) {
+            Remove-Item -LiteralPath $PortablePath -Recurse -Force
+            Write-Ok "Borrado: $PortablePath"
+        }
+    }
+    else {
+        Write-Note "No existe $PortablePath."
+    }
+
+    Write-Host ''
+    Write-Ok "Intacto: $(Join-Path $env:APPDATA 'Claude') (tu perfil original)."
+}
+
+# ------------------------------------------------------------------- main ---
+
+Write-Host ''
+Write-Host '=============================================================' -ForegroundColor White
+Write-Host '  Claude Desktop - configuracion de multiples instancias' -ForegroundColor White
+Write-Host '=============================================================' -ForegroundColor White
+
+Assert-ProfileNames -Names $Profiles
+
+if ($Revert) {
+    Invoke-Revert -Names $Profiles -PortablePath $PortableDir -SkipConfirm:$Force
+    Write-Host ''
+    exit 0
+}
+
+Write-Step 'Buscando la instalacion de Claude Desktop...'
+$install = Get-ClaudeInstall
+
+if (-not $install) {
+    Write-Err 'No se encontro Claude Desktop en este equipo.'
+    Write-Note 'Rutas revisadas: %LOCALAPPDATA%\AnthropicClaude, %ProgramFiles%\Claude y paquetes MSIX.'
+    Write-Note 'Instala Claude Desktop y vuelve a ejecutar este script.'
+    exit 1
+}
+
+Write-Ok "Modo de instalacion: $($install.Mode)"
+Write-Note "Carpeta: $($install.Dir)"
+
+$targetExe = $install.Exe
+
+# --- Caso MSIX: se necesita copia portable ----------------------------------
+if ($install.Mode -eq 'Msix') {
+    Write-Step 'Instalacion tipo MSIX detectada (Microsoft Store).'
+    Write-Note 'Windows no permite lanzar el .exe desde WindowsApps con parametros,'
+    Write-Note 'asi que hay que hacer una copia portable en una carpeta normal.'
+
+    # Se intenta la copia primero: en muchos equipos WindowsApps es legible
+    # para el usuario y no hace falta ni admin ni tocar ACLs.
+    $copied = $false
+    try {
+        Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite:$Force
+        $copied = $true
+    }
+    catch {
+        Write-Warn $_.Exception.Message
+    }
+
+    if (-not $copied) {
+        Write-Host ''
+        Write-Warn 'La copia fallo por los permisos restrictivos de WindowsApps.'
+        Write-Warn 'La solucion es dar permiso de lectura al grupo Administradores'
+        Write-Warn 'sobre esa carpeta. ESTO MODIFICA LOS PERMISOS DE UNA CARPETA'
+        Write-Warn 'PROTEGIDA DE WINDOWS y en casos raros puede afectar las'
+        Write-Warn 'actualizaciones automaticas de la app.'
+
+        $allowed = [bool]$GrantWindowsAppsRead
+        if (-not $allowed) {
+            if ([Environment]::UserInteractive) {
+                $allowed = $PSCmdlet.ShouldContinue(
+                    "Dar lectura al grupo Administradores sobre $($install.Dir)?",
+                    'Permisos de WindowsApps')
+            }
+            else {
+                Write-Err 'Ejecucion no interactiva: usa -GrantWindowsAppsRead para autorizarlo.'
+            }
+        }
+
+        if (-not $allowed) {
+            Write-Note 'Cancelado. Alternativa sin tocar permisos: crear un segundo'
+            Write-Note 'usuario de Windows y usar "Ejecutar como otro usuario".'
+            exit 1
+        }
+
+        if (-not (Test-Admin)) {
+            Write-Err 'Este paso necesita permisos de Administrador.'
+            Write-Note 'Cierra esta ventana y ejecuta Setup-ClaudeMulti.bat con boton'
+            Write-Note 'derecho -> "Ejecutar como administrador".'
+            exit 1
+        }
+
+        if ($PSCmdlet.ShouldProcess($install.Dir, 'takeown + icacls (lectura para Administradores)')) {
+            Write-Note 'Tomando posesion de la carpeta del paquete...'
+            & takeown.exe /F "$($install.Dir)" /R /D S | Out-Null
+            Write-Note 'Otorgando lectura a Administradores...'
+            & icacls.exe "$($install.Dir)" /grant '*S-1-5-32-544:(OI)(CI)(RX)' /T /C /Q | Out-Null
+
+            Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite:$Force
+        }
+    }
+
+    # Resolver el exe dentro de la copia respetando su ruta relativa
+    # (en MSIX suele ser <paquete>\app\claude.exe, no la raiz).
+    $portableExe = $null
+    if ($install.Exe) {
+        $baseDir = $install.Dir.TrimEnd('\')
+        if ($install.Exe.StartsWith($baseDir, [StringComparison]::OrdinalIgnoreCase)) {
+            $rel         = $install.Exe.Substring($baseDir.Length).TrimStart('\')
+            $portableExe = Join-Path $PortableDir $rel
+        }
+    }
+    if (-not $portableExe -or -not (Test-Path -LiteralPath $portableExe)) {
+        $found = Get-ChildItem -LiteralPath $PortableDir -Filter 'claude.exe' -Recurse `
+                   -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            $portableExe = $found.FullName
+        }
+        elseif (-not $WhatIfPreference) {
+            throw "No se encontro claude.exe dentro de $PortableDir"
+        }
+        elseif (-not $portableExe) {
+            $portableExe = Join-Path $PortableDir 'claude.exe'
+        }
+    }
+    $targetExe = $portableExe
+    Write-Ok "Copia portable lista: $targetExe"
+}
+else {
+    Write-Ok 'No hace falta copia portable: el ejecutable se puede lanzar directo.'
+}
+
+if (-not $targetExe -or (-not (Test-Path -LiteralPath $targetExe) -and -not $WhatIfPreference)) {
+    throw 'No se pudo determinar el ejecutable de Claude Desktop.'
+}
+
+# --- Crear los accesos directos ---------------------------------------------
+Write-Step 'Creando accesos directos en el Escritorio...'
+
+$created = @()
+for ($i = 0; $i -lt $Profiles.Count; $i++) {
+    $name  = $Profiles[$i]
+    $label = Get-ProfileLabel -Name $name -Index $i
+
+    if ($i -eq 0) {
+        # Primer perfil: carpeta de datos por defecto -> conserva tu sesion actual.
+        # En MSIX se lanza por el paquete de la Store para no perder auto-updates.
+        $dataDir = Join-Path $env:APPDATA 'Claude'
+        if ($install.Mode -eq 'Msix' -and $install.Aumid) {
+            $lnk = New-ClaudeShortcut -Name $label `
+                     -Target      (Join-Path $env:WINDIR 'explorer.exe') `
+                     -Arguments   "shell:AppsFolder\$($install.Aumid)" `
+                     -IconPath    $targetExe `
+                     -Description 'Claude Desktop - perfil por defecto (paquete de la Store, con auto-update)'
+            $via = 'Store'
+        }
+        else {
+            $lnk = New-ClaudeShortcut -Name $label `
+                     -Target      $targetExe `
+                     -IconPath    $targetExe `
+                     -Description 'Claude Desktop - perfil por defecto'
+            $via = 'Exe'
+        }
+    }
+    else {
+        $dataDir = Join-Path $env:APPDATA "Claude-$name"
+        if (-not (Test-Path -LiteralPath $dataDir)) {
+            New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+        }
+        if ($CopyMcpConfig) {
+            Copy-McpConfig -DestinationDir $dataDir -Overwrite:$Force
+        }
+        $lnk = New-ClaudeShortcut -Name $label `
+                 -Target      $targetExe `
+                 -Arguments   "--user-data-dir=`"$dataDir`"" `
+                 -IconPath    $targetExe `
+                 -Description "Claude Desktop - perfil aislado en $dataDir"
+        $via = 'Exe'
+    }
+
+    $created += [pscustomobject]@{
+        Perfil       = $name
+        Acceso       = Split-Path -Leaf $lnk
+        Lanza        = $via
+        CarpetaDatos = $dataDir
+    }
+    Write-Ok $label
+}
+
+# --- Resumen -----------------------------------------------------------------
+Write-Host ''
+Write-Host '=============================================================' -ForegroundColor White
+Write-Host '  Listo' -ForegroundColor Green
+Write-Host '=============================================================' -ForegroundColor White
+$created | Format-Table -AutoSize | Out-String | Write-Host
+
+Write-Host 'Como usarlo:' -ForegroundColor White
+Write-Note 'Abre el primer acceso directo -> es tu sesion de siempre.'
+Write-Note 'Abre el segundo -> pedira login. Entra con la otra cuenta.'
+Write-Note 'Ambas ventanas pueden estar abiertas al mismo tiempo.'
+Write-Host ''
+Write-Host 'Importante:' -ForegroundColor Yellow
+Write-Note 'Cowork corre en una VM Hyper-V unica por maquina: solo una instancia'
+Write-Note 'puede usar Cowork a la vez.'
+if (-not $CopyMcpConfig) {
+    Write-Note 'Los perfiles nuevos arrancan SIN MCP servers. Usa -CopyMcpConfig para'
+    Write-Note 'copiarles los que tengas en el perfil por defecto.'
+}
+if ($install.Mode -eq 'Msix') {
+    Write-Note 'La copia portable NO se auto-actualiza. Cuando Claude se actualice,'
+    Write-Note 'vuelve a correr este script con -Force para refrescarla.'
+    if ($install.Aumid) {
+        Write-Note 'El primer perfil se lanza por el paquete de la Store, asi que ese si'
+        Write-Note 'se mantiene actualizado solo.'
+    }
+}
+Write-Note 'Para revertir: vuelve a correr este script con -Revert y los mismos -Profiles.'
+Write-Host ''
+
+exit 0
