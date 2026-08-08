@@ -5,9 +5,13 @@ title Claude Desktop - Multi Instancia
 rem ---------------------------------------------------------------------
 rem  Lanzador de Setup-ClaudeMulti.ps1
 rem  Ejecuta el script de PowerShell que esta en esta misma carpeta.
-rem  Si la instalacion de Claude es MSIX (Microsoft Store), este .cmd
-rem  debe correrse como Administrador (boton derecho -> Ejecutar como
-rem  administrador). En instalaciones normales NO hace falta admin.
+rem
+rem  Se puede ejecutar cuantas veces se quiera: en cada arranque comprueba
+rem  si Claude Desktop se actualizo y, si es asi, refresca la copia
+rem  portable sola. Si ya esta al dia, termina en un segundo sin copiar.
+rem
+rem  Normalmente NO hace falta Administrador. Solo si la copia falla por
+rem  los permisos de WindowsApps el script lo pedira explicitamente.
 rem ---------------------------------------------------------------------
 
 set "PS1=%~dp0Setup-ClaudeMulti.ps1"
@@ -22,10 +26,15 @@ if not exist "%PS1%" (
 )
 
 echo.
-echo  Ejecutando configuracion...
+echo  Configurando / comprobando actualizaciones de Claude...
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
+
+if errorlevel 1 (
+    echo.
+    echo  [X] Termino con errores. Revisa los mensajes de arriba.
+)
 
 echo.
 pause

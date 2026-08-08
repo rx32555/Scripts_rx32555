@@ -23,13 +23,32 @@ Claude Desktop es una app Electron, y Electron acepta el parámetro `--user-data
 
 | Paso | Detalle |
 |------|---------|
-| 1. Detectar | Busca la instalación de Claude Desktop (installer `.exe` o paquete MSIX) |
-| 2. Copia portable | Solo si la instalación es MSIX: copia la app a `C:\ClaudePortable` |
+| 1. Detectar | Busca la instalación de Claude Desktop (installer `.exe` o paquete MSIX) y su versión |
+| 2. Copia portable | Solo si la instalación es MSIX: copia la app a `C:\ClaudePortable`, **o la actualiza si Claude cambió de versión** |
 | 3. Accesos directos | Crea un `.lnk` por perfil en el Escritorio, cada uno con su `--user-data-dir` |
 
 El **primer perfil** apunta a la carpeta por defecto (`%APPDATA%\Claude`), así conservas la sesión y los MCPs que ya tienes. Los siguientes usan `%APPDATA%\Claude-<Nombre>` y arrancan limpios.
 
 En instalaciones MSIX el acceso directo del primer perfil **no** apunta a la copia portable, sino al paquete de la Store (`shell:AppsFolder\<AUMID>`). Así tu perfil principal conserva las actualizaciones automáticas; la copia portable solo la usan los perfiles extra.
+
+---
+
+## Actualizaciones
+
+**Vuelve a hacer doble clic en `Setup-ClaudeMulti.bat` cuando quieras.** No hay nada más que hacer.
+
+Al copiar la app, el script deja un sello `C:\ClaudePortable\.claude-multi.json` con la versión copiada. En cada ejecución compara ese sello con la versión instalada:
+
+| Situación | Qué hace |
+|-----------|----------|
+| Misma versión | Nada. Termina en ~1 segundo. |
+| Claude se actualizó | Rehace la copia portable sola y avisa `1.26000 -> 1.26832`. |
+| Copia borrada, movida o corrupta | La rehace. |
+| Hay Claude abierto desde la copia portable | No toca nada y te pide cerrar esas ventanas. |
+
+El primer perfil no depende de esto: se lanza por el paquete de la Store y Windows lo actualiza solo.
+
+`-Force` sigue existiendo para forzar la recopia aunque las versiones coincidan.
 
 ---
 
@@ -75,7 +94,7 @@ Ambos deben quedar **en la misma carpeta**.
 | `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. Solo esa clave: no arrastra sesión, credenciales ni preferencias ligadas a tu cuenta. |
 | `-Revert` | — | Deshace todo: accesos directos, carpetas de los perfiles extra y copia portable. |
 | `-GrantWindowsAppsRead` | — | Autoriza sin preguntar el `takeown`+`icacls` sobre `WindowsApps`. Solo para ejecución desatendida. |
-| `-Force` | — | Rehace la copia portable, sobrescribe la config MCP ya copiada y, con `-Revert`, borra sin preguntar. |
+| `-Force` | — | Fuerza la recopia aunque la versión coincida, sobrescribe la config MCP ya copiada y, con `-Revert`, borra sin preguntar. |
 
 Además soporta `-WhatIf` y `-Confirm`: `-WhatIf` muestra exactamente qué se crearía o borraría sin tocar nada.
 
@@ -99,7 +118,7 @@ powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Force
 
 - **Cowork corre en una VM Hyper-V única por máquina.** Solo una instancia puede usar Cowork a la vez. El chat normal sí funciona en ambas en paralelo.
 - **Los MCPs no se heredan.** `claude_desktop_config.json` vive *dentro* de la carpeta de datos, así que cada perfil nuevo arranca con cero MCP servers. Usa `-CopyMcpConfig` para sembrarlos, o vuelve a configurarlos a mano. Ese archivo mezcla los MCP servers con preferencias de UI ligadas a la cuenta, por eso el script copia **solo** la clave `mcpServers`.
-- **La copia portable no se auto-actualiza.** Cuando Claude Desktop se actualice, vuelve a correr el script con `-Force`. El primer perfil no sufre esto: se lanza por el paquete de la Store.
+- **La copia portable no se actualiza sola en segundo plano.** Se actualiza al ejecutar `Setup-ClaudeMulti.bat`, que detecta la versión nueva por su cuenta (ver *Actualizaciones*). Si pasas semanas sin ejecutarlo, tus perfiles extra corren la versión vieja.
 - **La copia portable pierde la identidad de paquete MSIX.** En las instancias extra pueden no funcionar los deep links `claude://`, las notificaciones nativas y el auto-update. El chat, los proyectos y los MCPs sí.
 - **Permisos de `WindowsApps`.** En muchos equipos la carpeta ya es legible y no hace falta admin: el script **intenta la copia primero** y solo si falla ofrece dar lectura al grupo Administradores mediante `takeown` + `icacls`, pidiendo confirmación explícita. Es una carpeta protegida del sistema y en casos raros puede afectar las actualizaciones automáticas del paquete. Responder `N` cancela sin tocar nada.
 - Esta es una solución de usuario, no algo soportado oficialmente por Anthropic.

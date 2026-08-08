@@ -97,6 +97,62 @@ function ConvertTo-SafeVersion {
     return $zero
 }
 
+function Get-ExeVersion {
+    param([string]$Path)
+    try {
+        $fi = [Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+        if ($fi.FileVersion) { return $fi.FileVersion.Trim() }
+    } catch { }
+    return $null
+}
+
+# --- Sello de version de la copia portable -----------------------------------
+# Se deja un archivo dentro de PortableDir con la version que se copio. En cada
+# ejecucion se compara con la instalada; si cambia, la copia se rehace sola.
+
+$script:StampFile = '.claude-multi.json'
+
+function Get-PortableStamp {
+    param([Parameter(Mandatory)][string]$PortablePath)
+
+    $file = Join-Path $PortablePath $script:StampFile
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    try {
+        $s = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+        if (-not $s.version -or -not $s.exe) { return $null }
+        return $s
+    }
+    catch { return $null }
+}
+
+# Procesos corriendo desde la copia portable: bloquearian el borrado al actualizar.
+function Get-PortableProcess {
+    param([Parameter(Mandatory)][string]$PortablePath)
+
+    $base = $PortablePath.TrimEnd('\') + '\'
+    Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -and $_.Path.StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }
+        catch { $false }
+    }
+}
+
+function Set-PortableStamp {
+    param(
+        [Parameter(Mandatory)][string]$PortablePath,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Exe,
+        [string]$Source
+    )
+    $stamp = [pscustomobject]@{
+        version = $Version
+        exe     = $Exe
+        source  = $Source
+        stamped = (Get-Date).ToString('s')
+    }
+    $file = Join-Path $PortablePath $script:StampFile
+    [IO.File]::WriteAllText($file, ($stamp | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+}
+
 # Valida nombres de perfil: se usan como nombre de archivo (.lnk) y de carpeta.
 function Assert-ProfileNames {
     param([string[]]$Names)
@@ -144,7 +200,10 @@ function Get-ClaudeInstall {
     foreach ($root in $roots) {
         $direct = Join-Path $root 'claude.exe'
         if (Test-Path $direct) {
-            return [pscustomobject]@{ Exe = $direct; Dir = $root; Mode = 'Direct'; Aumid = $null }
+            return [pscustomobject]@{
+                Exe = $direct; Dir = $root; Mode = 'Direct'; Aumid = $null
+                Version = (Get-ExeVersion $direct)
+            }
         }
         # Ordenar por version real, no por nombre: app-1.10.0 > app-1.9.0
         $appDirs = Get-ChildItem -LiteralPath $root -Directory -Filter 'app-*' `
@@ -153,7 +212,11 @@ function Get-ClaudeInstall {
         foreach ($d in $appDirs) {
             $exe = Join-Path $d.FullName 'claude.exe'
             if (Test-Path $exe) {
-                return [pscustomobject]@{ Exe = $exe; Dir = $d.FullName; Mode = 'Direct'; Aumid = $null }
+                $v = Get-ExeVersion $exe
+                if (-not $v) { $v = ($d.Name -replace '^app-', '') }
+                return [pscustomobject]@{
+                    Exe = $exe; Dir = $d.FullName; Mode = 'Direct'; Aumid = $null; Version = $v
+                }
             }
         }
     }
@@ -184,10 +247,11 @@ function Get-ClaudeInstall {
                  -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
 
         return [pscustomobject]@{
-            Exe   = $(if ($exe) { $exe.FullName } else { $null })
-            Dir   = $pkg.InstallLocation
-            Mode  = 'Msix'
-            Aumid = $aumid
+            Exe     = $(if ($exe) { $exe.FullName } else { $null })
+            Dir     = $pkg.InstallLocation
+            Mode    = 'Msix'
+            Aumid   = $aumid
+            Version = [string]$pkg.Version
         }
     }
 
@@ -240,7 +304,6 @@ function Copy-ToPortable {
     )
 
     if ((Test-Path $Destination) -and -not $Overwrite) {
-        Write-Warn "Ya existe $Destination. Usa -Force para rehacer la copia."
         Write-Note 'Se reutilizara la copia existente.'
         return
     }
@@ -426,8 +489,10 @@ if (-not $install) {
 
 Write-Ok "Modo de instalacion: $($install.Mode)"
 Write-Note "Carpeta: $($install.Dir)"
+if ($install.Version) { Write-Note "Version instalada: $($install.Version)" }
 
-$targetExe = $install.Exe
+$targetExe   = $install.Exe
+$portableNew = $false
 
 # --- Caso MSIX: se necesita copia portable ----------------------------------
 if ($install.Mode -eq 'Msix') {
@@ -435,18 +500,77 @@ if ($install.Mode -eq 'Msix') {
     Write-Note 'Windows no permite lanzar el .exe desde WindowsApps con parametros,'
     Write-Note 'asi que hay que hacer una copia portable en una carpeta normal.'
 
+    # --- Comprobar si la copia portable esta al dia -------------------------
+    $stamp      = Get-PortableStamp -PortablePath $PortableDir
+    $needsCopy  = $true
+    $copyReason = 'No hay copia portable todavia.'
+
+    if ($Force) {
+        $copyReason = 'Se pidio -Force: se rehace la copia.'
+    }
+    elseif ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
+        if ($stamp.version -eq $install.Version) {
+            $needsCopy  = $false
+            $targetExe  = $stamp.exe
+            Write-Ok "Copia portable al dia (version $($stamp.version)). No hay nada que actualizar."
+        }
+        else {
+            $copyReason = "Claude se actualizo: $($stamp.version) -> $($install.Version). Actualizando la copia..."
+        }
+    }
+    elseif ($stamp) {
+        $copyReason = 'La copia portable esta incompleta o movida: se rehace.'
+    }
+    elseif (Test-Path -LiteralPath $PortableDir) {
+        $copyReason = 'Hay una copia portable sin sello de version: se rehace para poder controlarla.'
+    }
+
+    if ($needsCopy) {
+        Write-Note $copyReason
+
+        # No se puede reemplazar la copia con la app abierta desde ella.
+        $running = @(Get-PortableProcess -PortablePath $PortableDir)
+        if ($running.Count -gt 0) {
+            Write-Warn "Hay $($running.Count) proceso(s) de Claude corriendo desde $PortableDir."
+            Write-Warn 'No se puede reemplazar la copia mientras esten abiertos.'
+            Write-Note 'Cierra esas ventanas de Claude y vuelve a ejecutar Setup-ClaudeMulti.bat.'
+            Write-Note 'Por ahora se sigue usando la copia actual.'
+            $needsCopy = $false
+            if ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
+                $targetExe = $stamp.exe
+            }
+            else {
+                $found = Get-ChildItem -LiteralPath $PortableDir -Filter 'claude.exe' -Recurse `
+                           -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (-not $found) { throw "No se encontro claude.exe dentro de $PortableDir" }
+                $targetExe = $found.FullName
+            }
+        }
+    }
+
     # Se intenta la copia primero: en muchos equipos WindowsApps es legible
     # para el usuario y no hace falta ni admin ni tocar ACLs.
-    $copied = $false
-    try {
-        Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite:$Force
-        $copied = $true
-    }
-    catch {
-        Write-Warn $_.Exception.Message
+    $copied = -not $needsCopy
+    if ($needsCopy) {
+        $portableNew = $true
+        try {
+            Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite
+            $copied = $true
+        }
+        catch {
+            Write-Warn $_.Exception.Message
+        }
     }
 
     if (-not $copied) {
+        # Puede fallar por la app abierta desde la copia, no solo por permisos.
+        if (@(Get-PortableProcess -PortablePath $PortableDir).Count -gt 0) {
+            Write-Host ''
+            Write-Err  'La actualizacion fallo: hay Claude abierto desde la copia portable.'
+            Write-Note 'Cierra todas las ventanas de Claude y vuelve a ejecutar el .bat.'
+            exit 1
+        }
+
         Write-Host ''
         Write-Warn 'La copia fallo por los permisos restrictivos de WindowsApps.'
         Write-Warn 'La solucion es dar permiso de lectura al grupo Administradores'
@@ -485,38 +609,51 @@ if ($install.Mode -eq 'Msix') {
             Write-Note 'Otorgando lectura a Administradores...'
             & icacls.exe "$($install.Dir)" /grant '*S-1-5-32-544:(OI)(CI)(RX)' /T /C /Q | Out-Null
 
-            Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite:$Force
+            Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite
         }
     }
 
-    # Resolver el exe dentro de la copia respetando su ruta relativa
-    # (en MSIX suele ser <paquete>\app\claude.exe, no la raiz).
-    $portableExe = $null
-    if ($install.Exe) {
-        $baseDir = $install.Dir.TrimEnd('\')
-        if ($install.Exe.StartsWith($baseDir, [StringComparison]::OrdinalIgnoreCase)) {
-            $rel         = $install.Exe.Substring($baseDir.Length).TrimStart('\')
-            $portableExe = Join-Path $PortableDir $rel
+    if ($portableNew) {
+        # Resolver el exe dentro de la copia respetando su ruta relativa
+        # (en MSIX suele ser <paquete>\app\claude.exe, no la raiz).
+        $portableExe = $null
+        if ($install.Exe) {
+            $baseDir = $install.Dir.TrimEnd('\')
+            if ($install.Exe.StartsWith($baseDir, [StringComparison]::OrdinalIgnoreCase)) {
+                $rel         = $install.Exe.Substring($baseDir.Length).TrimStart('\')
+                $portableExe = Join-Path $PortableDir $rel
+            }
         }
+        if (-not $portableExe -or -not (Test-Path -LiteralPath $portableExe)) {
+            $found = Get-ChildItem -LiteralPath $PortableDir -Filter 'claude.exe' -Recurse `
+                       -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                $portableExe = $found.FullName
+            }
+            elseif (-not $WhatIfPreference) {
+                throw "No se encontro claude.exe dentro de $PortableDir"
+            }
+            elseif (-not $portableExe) {
+                $portableExe = Join-Path $PortableDir 'claude.exe'
+            }
+        }
+        $targetExe = $portableExe
+
+        # Sellar la version: es lo que permite detectar la proxima actualizacion.
+        if (-not $WhatIfPreference) {
+            Set-PortableStamp -PortablePath $PortableDir -Version $install.Version `
+                              -Exe $targetExe -Source $install.Dir
+        }
+        Write-Ok "Copia portable lista (version $($install.Version)): $targetExe"
     }
-    if (-not $portableExe -or -not (Test-Path -LiteralPath $portableExe)) {
-        $found = Get-ChildItem -LiteralPath $PortableDir -Filter 'claude.exe' -Recurse `
-                   -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $portableExe = $found.FullName
-        }
-        elseif (-not $WhatIfPreference) {
-            throw "No se encontro claude.exe dentro de $PortableDir"
-        }
-        elseif (-not $portableExe) {
-            $portableExe = Join-Path $PortableDir 'claude.exe'
-        }
-    }
-    $targetExe = $portableExe
-    Write-Ok "Copia portable lista: $targetExe"
 }
 else {
     Write-Ok 'No hace falta copia portable: el ejecutable se puede lanzar directo.'
+    if ($install.Exe -match '\\app-[0-9]') {
+        Write-Warn 'El ejecutable esta dentro de una carpeta con numero de version.'
+        Write-Warn 'Cuando Claude se actualice, esa ruta desaparece y los accesos'
+        Write-Warn 'directos dejaran de funcionar: vuelve a correr este script.'
+    }
 }
 
 if (-not $targetExe -or (-not (Test-Path -LiteralPath $targetExe) -and -not $WhatIfPreference)) {
@@ -596,12 +733,11 @@ if (-not $CopyMcpConfig) {
     Write-Note 'copiarles los que tengas en el perfil por defecto.'
 }
 if ($install.Mode -eq 'Msix') {
-    Write-Note 'La copia portable NO se auto-actualiza. Cuando Claude se actualice,'
-    Write-Note 'vuelve a correr este script con -Force para refrescarla.'
     if ($install.Aumid) {
-        Write-Note 'El primer perfil se lanza por el paquete de la Store, asi que ese si'
-        Write-Note 'se mantiene actualizado solo.'
+        Write-Note 'El primer perfil se lanza por el paquete de la Store: se actualiza solo.'
     }
+    Write-Note 'La copia portable (perfiles extra) se refresca ejecutando de nuevo'
+    Write-Note 'Setup-ClaudeMulti.bat: detecta la version nueva y la copia sola.'
 }
 Write-Note 'Para revertir: vuelve a correr este script con -Revert y los mismos -Profiles.'
 Write-Host ''
