@@ -32,6 +32,10 @@
     a cada perfil nuevo. Solo esa clave: no copia sesion, credenciales ni las
     preferencias de UI ligadas a tu cuenta que viven en el mismo archivo.
 
+.PARAMETER NoLauncher
+    Los accesos directos apuntan directo al .exe, sin pasar por el lanzador que
+    comprueba actualizaciones. Los iconos de color se siguen aplicando.
+
 .PARAMETER GrantWindowsAppsRead
     Autoriza sin preguntar el takeown+icacls sobre la carpeta del paquete MSIX,
     para escenarios desatendidos. Solo se usa si la copia falla por permisos.
@@ -59,6 +63,7 @@ param(
     [string[]]$Profiles    = @('Cuenta1', 'Cuenta2'),
     [string]  $PortableDir = 'C:\ClaudePortable',
     [switch]  $CopyMcpConfig,
+    [switch]  $NoLauncher,
     [switch]  $GrantWindowsAppsRead,
     [switch]  $Revert,
     [switch]  $Force
@@ -95,6 +100,209 @@ function ConvertTo-SafeVersion {
     $parsed = $zero
     if ([version]::TryParse($clean, [ref]$parsed)) { return $parsed }
     return $zero
+}
+
+# --- Iconos de color por perfil ---------------------------------------------
+# Se toma el icono real de Claude y se le pega una insignia de color con la
+# inicial del perfil, para distinguir los accesos directos de un vistazo.
+
+$script:HomeDir = Join-Path $env:APPDATA 'ClaudeMulti'
+
+# Ojo: nada de coral/naranja. El icono de Claude ya es coral y la insignia
+# se volveria invisible sobre el.
+$script:Palette = @(
+    @{ Nombre = 'azul';   Rgb = @( 37, 118, 208) },
+    @{ Nombre = 'verde';  Rgb = @( 34, 150,  94) },
+    @{ Nombre = 'morado'; Rgb = @(126,  78, 214) },
+    @{ Nombre = 'cian';   Rgb = @( 20, 150, 176) },
+    @{ Nombre = 'rosa';   Rgb = @(209,  56, 130) },
+    @{ Nombre = 'azabache'; Rgb = @( 45,  55,  72) },
+    @{ Nombre = 'oliva';  Rgb = @(107, 142,  35) }
+)
+
+function Get-ProfileColor {
+    param([int]$Index)
+    $script:Palette[$Index % $script:Palette.Count]
+}
+
+function Initialize-IconApi {
+    if (-not ('ClaudeMulti.IconApi' -as [type])) {
+        Add-Type -Namespace 'ClaudeMulti' -Name 'IconApi' -MemberDefinition @'
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+public static extern int PrivateExtractIcons(string lpszFile, int nIconIndex,
+    int cxDesired, int cyDesired, IntPtr[] phicon, int[] piconid, int nIcons, int flags);
+[DllImport("user32.dll")]
+public static extern bool DestroyIcon(IntPtr hIcon);
+'@
+    }
+    Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+}
+
+# Extrae el icono grande del .exe (256px). Devuelve $null si no se puede.
+function Get-AppIconBitmap {
+    param([Parameter(Mandatory)][string]$ExePath, [int]$Size = 256)
+
+    $handles = New-Object IntPtr[] 1
+    $ids     = New-Object int[] 1
+    $bmp     = $null
+    try {
+        $n = [ClaudeMulti.IconApi]::PrivateExtractIcons($ExePath, 0, $Size, $Size, $handles, $ids, 1, 0)
+        if ($n -gt 0 -and $handles[0] -ne [IntPtr]::Zero) {
+            $ico = [System.Drawing.Icon]::FromHandle($handles[0])
+            $bmp = New-Object System.Drawing.Bitmap($Size, $Size,
+                     [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = 'HighQualityBicubic'
+            $g.DrawIcon($ico, (New-Object System.Drawing.Rectangle(0, 0, $Size, $Size)))
+            $g.Dispose()
+            $ico.Dispose()
+        }
+    }
+    catch { $bmp = $null }
+    finally {
+        if ($handles[0] -ne [IntPtr]::Zero) { [void][ClaudeMulti.IconApi]::DestroyIcon($handles[0]) }
+    }
+    return $bmp
+}
+
+function New-BadgedBitmap {
+    param(
+        [System.Drawing.Bitmap]$Base,
+        [Parameter(Mandatory)][string]$Letter,
+        [Parameter(Mandatory)][int[]]$Rgb,
+        [Parameter(Mandatory)][int]$Size
+    )
+
+    $color = [System.Drawing.Color]::FromArgb(255, $Rgb[0], $Rgb[1], $Rgb[2])
+    $bmp   = New-Object System.Drawing.Bitmap($Size, $Size,
+               [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g     = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode     = 'AntiAlias'
+    $g.InterpolationMode = 'HighQualityBicubic'
+    $g.PixelOffsetMode   = 'HighQuality'
+    $g.TextRenderingHint = 'AntiAliasGridFit'
+
+    if ($Base) {
+        $g.DrawImage($Base, (New-Object System.Drawing.Rectangle(0, 0, $Size, $Size)))
+    }
+    else {
+        # Sin icono de origen: cuadrado redondeado del color del perfil.
+        $pad  = [int]($Size * 0.06)
+        $r    = [int]($Size * 0.22)
+        $rect = New-Object System.Drawing.Rectangle($pad, $pad, ($Size - 2 * $pad), ($Size - 2 * $pad))
+        $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $path.AddArc($rect.X, $rect.Y, $r, $r, 180, 90)
+        $path.AddArc(($rect.Right - $r), $rect.Y, $r, $r, 270, 90)
+        $path.AddArc(($rect.Right - $r), ($rect.Bottom - $r), $r, $r, 0, 90)
+        $path.AddArc($rect.X, ($rect.Bottom - $r), $r, $r, 90, 90)
+        $path.CloseFigure()
+        $fill = New-Object System.Drawing.SolidBrush($color)
+        $g.FillPath($fill, $path)
+        $fill.Dispose(); $path.Dispose()
+    }
+
+    # Insignia circular abajo a la derecha. Grande a proposito: a 32px es lo
+    # unico que distingue un acceso directo de otro.
+    $d    = [int]($Size * 0.54)
+    $x    = $Size - $d
+    $y    = $Size - $d
+    $ring = [Math]::Max(1, [int]($Size * 0.03))
+
+    $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+    $g.FillEllipse($white, ($x - $ring), ($y - $ring), ($d + 2 * $ring), ($d + 2 * $ring))
+    $brush = New-Object System.Drawing.SolidBrush($color)
+    $g.FillEllipse($brush, $x, $y, $d, $d)
+
+    # La letra solo se lee a partir de cierto tamano.
+    if ($Size -ge 48) {
+        $fontSize = [single]($d * 0.60)
+        $font = New-Object System.Drawing.Font('Segoe UI', $fontSize,
+                  [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+        $fmt = New-Object System.Drawing.StringFormat
+        $fmt.Alignment     = 'Center'
+        $fmt.LineAlignment = 'Center'
+        $box = New-Object System.Drawing.RectangleF($x, $y, $d, $d)
+        $g.DrawString($Letter.ToUpperInvariant(), $font, $white, $box, $fmt)
+        $font.Dispose(); $fmt.Dispose()
+    }
+
+    $white.Dispose(); $brush.Dispose(); $g.Dispose()
+    return $bmp
+}
+
+# Escribe un .ico multi-resolucion con frames PNG (soportado desde Vista).
+function Save-IcoFile {
+    param(
+        [Parameter(Mandatory)][System.Drawing.Bitmap[]]$Bitmaps,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $pngs = @()
+    foreach ($b in $Bitmaps) {
+        $ms = New-Object IO.MemoryStream
+        $b.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+        $pngs += , $ms.ToArray()
+        $ms.Dispose()
+    }
+
+    $fs = [IO.File]::Open($Path, [IO.FileMode]::Create)
+    $bw = New-Object IO.BinaryWriter($fs)
+    try {
+        $bw.Write([uint16]0)             # reservado
+        $bw.Write([uint16]1)             # tipo: 1 = icono
+        $bw.Write([uint16]$pngs.Count)
+
+        $offset = 6 + (16 * $pngs.Count)
+        for ($i = 0; $i -lt $pngs.Count; $i++) {
+            $w = $Bitmaps[$i].Width
+            $dim = [byte]$(if ($w -ge 256) { 0 } else { $w })   # 0 significa 256
+            $bw.Write($dim)              # ancho
+            $bw.Write($dim)              # alto
+            $bw.Write([byte]0)           # colores de paleta
+            $bw.Write([byte]0)           # reservado
+            $bw.Write([uint16]1)         # planos
+            $bw.Write([uint16]32)        # bits por pixel
+            $bw.Write([uint32]$pngs[$i].Length)
+            $bw.Write([uint32]$offset)
+            $offset += $pngs[$i].Length
+        }
+        foreach ($p in $pngs) { $bw.Write($p) }
+        $bw.Flush()
+    }
+    finally { $bw.Dispose(); $fs.Dispose() }
+}
+
+function New-ProfileIcon {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][int]$Index,
+        [string]$SourceExe,
+        [Parameter(Mandatory)][string]$OutDir
+    )
+
+    Initialize-IconApi
+    if (-not (Test-Path -LiteralPath $OutDir)) {
+        New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+    }
+
+    $color  = Get-ProfileColor -Index $Index
+    $letter = $Name.Substring(0, 1)
+    $out    = Join-Path $OutDir "$Name.ico"
+
+    $base = $null
+    if ($SourceExe -and (Test-Path -LiteralPath $SourceExe)) {
+        $base = Get-AppIconBitmap -ExePath $SourceExe -Size 256
+    }
+
+    $frames = @()
+    foreach ($s in 256, 128, 64, 48, 32, 16) {
+        $frames += New-BadgedBitmap -Base $base -Letter $letter -Rgb $color.Rgb -Size $s
+    }
+    Save-IcoFile -Bitmaps $frames -Path $out
+    foreach ($f in $frames) { $f.Dispose() }
+    if ($base) { $base.Dispose() }
+
+    return [pscustomobject]@{ Path = $out; Color = $color.Nombre }
 }
 
 function Get-ExeVersion {
@@ -386,6 +594,169 @@ function Copy-McpConfig {
     Write-Note "MCPs copiados ($($names -join ', ')) -> $dst"
 }
 
+# --- Lanzador por perfil -----------------------------------------------------
+# Los accesos directos no apuntan al .exe: apuntan a un lanzador que primero
+# comprueba si Claude se actualizo y, si hace falta, refresca la copia portable.
+
+$script:LauncherPs1 = @'
+# Lanzador de un perfil de Claude Desktop.
+# Comprueba si hay una version nueva de Claude antes de abrir la ventana.
+# Lo genera Setup-ClaudeMulti.ps1: no lo edites a mano, se sobrescribe.
+param([Parameter(Mandatory)][string]$ProfileName)
+
+$ErrorActionPreference = 'Stop'
+$base    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$cfgFile = Join-Path $base 'config.json'
+
+function Show-Error {
+    param([string]$Message)
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [void][System.Windows.Forms.MessageBox]::Show($Message, 'Claude Multi Instancia',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error)
+    } catch { Write-Host $Message }
+    exit 1
+}
+
+if (-not (Test-Path -LiteralPath $cfgFile)) {
+    Show-Error "No se encontro config.json en $base.`n`nVuelve a ejecutar Setup-ClaudeMulti.bat."
+}
+$cfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+$prof = $cfg.profiles | Where-Object { $_.name -eq $ProfileName } | Select-Object -First 1
+if (-not $prof) {
+    Show-Error "El perfil '$ProfileName' ya no esta configurado.`n`nVuelve a ejecutar Setup-ClaudeMulti.bat."
+}
+
+# Perfil por defecto sobre el paquete de la Store: Windows lo actualiza solo.
+if ($prof.useStore -and $cfg.aumid) {
+    Start-Process 'explorer.exe' "shell:AppsFolder\$($cfg.aumid)"
+    exit 0
+}
+
+function Get-InstalledVersion {
+    if ($cfg.mode -eq 'Msix') {
+        $pkg = Get-AppxPackage -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -match 'Claude' -or $_.Publisher -match 'Anthropic' } |
+               Select-Object -First 1
+        if ($pkg) { return [string]$pkg.Version }
+        return $null
+    }
+    try {
+        $fi = [Diagnostics.FileVersionInfo]::GetVersionInfo($cfg.sourceExe)
+        if ($fi.FileVersion) { return $fi.FileVersion.Trim() }
+    } catch { }
+    return $null
+}
+
+function Test-PortableBusy {
+    if (-not $cfg.portableDir) { return $false }
+    $prefix = $cfg.portableDir.TrimEnd('\') + '\'
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) }
+        catch { $false }
+    }
+    return (@($procs).Count -gt 0)
+}
+
+# --- Comprobar si hay version nueva -----------------------------------------
+$exe    = $prof.exe
+$update = $false
+
+if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
+    $update = $true
+}
+elseif ($cfg.mode -eq 'Msix') {
+    $stampFile = Join-Path $cfg.portableDir '.claude-multi.json'
+    $stampVer  = $null
+    if (Test-Path -LiteralPath $stampFile) {
+        try { $stampVer = (Get-Content -LiteralPath $stampFile -Raw | ConvertFrom-Json).version } catch { }
+    }
+    $installed = Get-InstalledVersion
+    if ($installed -and $stampVer -and $installed -ne $stampVer) { $update = $true }
+}
+
+if ($update -and (Test-PortableBusy)) {
+    # No se puede reemplazar la copia con Claude abierto desde ella.
+    $update = $false
+}
+
+if ($update) {
+    $setup = Join-Path $base 'Setup-ClaudeMulti.ps1'
+    if (Test-Path -LiteralPath $setup) {
+        # Start-Process une los argumentos con espacios y NO los entrecomilla:
+        # hay que citar a mano o una ruta como "C:\Users\A Nombre\..." se parte.
+        $names = @($cfg.profiles | ForEach-Object { '"' + $_.name + '"' })
+        $argv  = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$setup`"", '-Profiles') + $names
+        # Ventana visible: la copia tarda y el usuario debe ver que pasa algo.
+        Start-Process 'powershell.exe' -ArgumentList $argv -Wait
+        try {
+            $cfg  = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+            $prof = $cfg.profiles | Where-Object { $_.name -eq $ProfileName } | Select-Object -First 1
+            if ($prof) { $exe = $prof.exe }
+        } catch { }
+    }
+}
+
+if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
+    Show-Error "No se encontro el ejecutable de Claude:`n$exe`n`nEjecuta Setup-ClaudeMulti.bat para repararlo."
+}
+
+Start-Process -FilePath $exe -ArgumentList "--user-data-dir=`"$($prof.dataDir)`""
+'@
+
+# wscript lanza PowerShell oculto: sin parpadeo de consola negra al abrir.
+$script:LauncherVbs = @'
+Option Explicit
+Dim sh, fso, base, ps1, prof, cmd
+Set sh  = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+base = fso.GetParentFolderName(WScript.ScriptFullName)
+ps1  = base & "\Launch-ClaudeProfile.ps1"
+If WScript.Arguments.Count > 0 Then
+    prof = WScript.Arguments(0)
+Else
+    prof = ""
+End If
+cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & ps1 & """ -ProfileName """ & prof & """"
+sh.Run cmd, 0, False
+'@
+
+function Install-Launcher {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([Parameter(Mandatory)][string]$HomePath)
+
+    if (-not (Test-Path -LiteralPath $HomePath)) {
+        New-Item -ItemType Directory -Path $HomePath -Force | Out-Null
+    }
+    if (-not $PSCmdlet.ShouldProcess($HomePath, 'Instalar lanzador de perfiles')) { return }
+
+    $enc = New-Object Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText((Join-Path $HomePath 'Launch-ClaudeProfile.ps1'), $script:LauncherPs1, $enc)
+    [IO.File]::WriteAllText((Join-Path $HomePath 'launch.vbs'), $script:LauncherVbs, $enc)
+
+    # Copia del propio setup, para que el lanzador pueda actualizar aunque
+    # muevas o borres la carpeta del repositorio.
+    $self = $PSCommandPath
+    $dest = Join-Path $HomePath 'Setup-ClaudeMulti.ps1'
+    if ($self -and (Test-Path -LiteralPath $self)) {
+        if ([IO.Path]::GetFullPath($self) -ne [IO.Path]::GetFullPath($dest)) {
+            Copy-Item -LiteralPath $self -Destination $dest -Force
+        }
+    }
+}
+
+function Write-LauncherConfig {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string]$HomePath,
+        [Parameter(Mandatory)]$Config
+    )
+    if (-not $PSCmdlet.ShouldProcess((Join-Path $HomePath 'config.json'), 'Escribir configuracion')) { return }
+    $json = $Config | ConvertTo-Json -Depth 8
+    [IO.File]::WriteAllText((Join-Path $HomePath 'config.json'), $json, (New-Object Text.UTF8Encoding($false)))
+}
+
 function Get-ProfileLabel {
     param([string]$Name, [int]$Index)
     if ($Index -eq 0) { return "Claude - $Name (perfil actual)" }
@@ -430,9 +801,17 @@ function Invoke-Revert {
         $go = $SkipConfirm
         if (-not $go) {
             $list = ($dataDirs -join "`n      ")
-            $go = $PSCmdlet.ShouldContinue(
-                "Se van a borrar estas carpetas y con ellas la sesion y los MCPs de esos perfiles:`n      $list`n`nContinuar?",
-                'Borrar datos de perfiles')
+            try {
+                $go = $PSCmdlet.ShouldContinue(
+                    "Se van a borrar estas carpetas y con ellas la sesion y los MCPs de esos perfiles:`n      $list`n`nContinuar?",
+                    'Borrar datos de perfiles')
+            }
+            catch {
+                # Host no interactivo: no se puede confirmar un borrado de datos.
+                Write-Warn 'No se puede pedir confirmacion en este host.'
+                Write-Note 'Anade -Force para borrar las carpetas de datos sin preguntar.'
+                $go = $false
+            }
         }
         if ($go) {
             foreach ($d in $dataDirs) {
@@ -445,6 +824,17 @@ function Invoke-Revert {
         else {
             Write-Note 'Carpetas de datos conservadas.'
         }
+    }
+
+    Write-Step 'Borrando lanzador e iconos...'
+    if (Test-Path -LiteralPath $script:HomeDir) {
+        if ($PSCmdlet.ShouldProcess($script:HomeDir, 'Eliminar lanzador, iconos y configuracion')) {
+            Remove-Item -LiteralPath $script:HomeDir -Recurse -Force
+            Write-Ok "Borrado: $script:HomeDir"
+        }
+    }
+    else {
+        Write-Note "No existe $script:HomeDir."
     }
 
     Write-Step 'Borrando la copia portable...'
@@ -468,6 +858,16 @@ Write-Host ''
 Write-Host '=============================================================' -ForegroundColor White
 Write-Host '  Claude Desktop - configuracion de multiples instancias' -ForegroundColor White
 Write-Host '=============================================================' -ForegroundColor White
+
+# Al invocar via .bat, cmd entrega "-Profiles A,B" como UN solo token y
+# powershell -File no lo parte en array. Se normaliza aqui para que
+# "-Profiles A,B" signifique lo mismo desde cmd que desde PowerShell.
+$Profiles = @(
+    $Profiles |
+    ForEach-Object { $_ -split ',' } |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ }
+)
 
 Assert-ProfileNames -Names $Profiles
 
@@ -580,13 +980,14 @@ if ($install.Mode -eq 'Msix') {
 
         $allowed = [bool]$GrantWindowsAppsRead
         if (-not $allowed) {
-            if ([Environment]::UserInteractive) {
+            try {
                 $allowed = $PSCmdlet.ShouldContinue(
                     "Dar lectura al grupo Administradores sobre $($install.Dir)?",
                     'Permisos de WindowsApps')
             }
-            else {
+            catch {
                 Write-Err 'Ejecucion no interactiva: usa -GrantWindowsAppsRead para autorizarlo.'
+                $allowed = $false
             }
         }
 
@@ -660,33 +1061,49 @@ if (-not $targetExe -or (-not (Test-Path -LiteralPath $targetExe) -and -not $Wha
     throw 'No se pudo determinar el ejecutable de Claude Desktop.'
 }
 
+# --- Iconos y lanzador -------------------------------------------------------
+$iconDir = Join-Path $script:HomeDir 'icons'
+
+Write-Step 'Generando iconos de color por perfil...'
+$icons = @{}
+for ($i = 0; $i -lt $Profiles.Count; $i++) {
+    $n = $Profiles[$i]
+    try {
+        $ic = New-ProfileIcon -Name $n -Index $i -SourceExe $targetExe -OutDir $iconDir
+        $icons[$n] = $ic
+        Write-Ok "$n -> $($ic.Color)"
+    }
+    catch {
+        Write-Warn "No se pudo generar el icono de '$n': $($_.Exception.Message)"
+        Write-Note 'Se usara el icono normal de Claude.'
+        $icons[$n] = $null
+    }
+}
+
+if (-not $NoLauncher) {
+    Write-Step 'Instalando lanzador (comprueba actualizaciones antes de abrir)...'
+    Install-Launcher -HomePath $script:HomeDir
+    Write-Ok $script:HomeDir
+}
+
 # --- Crear los accesos directos ---------------------------------------------
 Write-Step 'Creando accesos directos en el Escritorio...'
 
-$created = @()
+$wscript  = Join-Path $env:WINDIR 'System32\wscript.exe'
+$vbs      = Join-Path $script:HomeDir 'launch.vbs'
+$created  = @()
+$cfgProfs = @()
+
 for ($i = 0; $i -lt $Profiles.Count; $i++) {
-    $name  = $Profiles[$i]
-    $label = Get-ProfileLabel -Name $name -Index $i
+    $name     = $Profiles[$i]
+    $label    = Get-ProfileLabel -Name $name -Index $i
+    $iconPath = $(if ($icons[$name]) { $icons[$name].Path } else { $targetExe })
+    $color    = $(if ($icons[$name]) { $icons[$name].Color } else { '-' })
+    $useStore = ($i -eq 0 -and $install.Mode -eq 'Msix' -and $install.Aumid)
 
     if ($i -eq 0) {
         # Primer perfil: carpeta de datos por defecto -> conserva tu sesion actual.
-        # En MSIX se lanza por el paquete de la Store para no perder auto-updates.
         $dataDir = Join-Path $env:APPDATA 'Claude'
-        if ($install.Mode -eq 'Msix' -and $install.Aumid) {
-            $lnk = New-ClaudeShortcut -Name $label `
-                     -Target      (Join-Path $env:WINDIR 'explorer.exe') `
-                     -Arguments   "shell:AppsFolder\$($install.Aumid)" `
-                     -IconPath    $targetExe `
-                     -Description 'Claude Desktop - perfil por defecto (paquete de la Store, con auto-update)'
-            $via = 'Store'
-        }
-        else {
-            $lnk = New-ClaudeShortcut -Name $label `
-                     -Target      $targetExe `
-                     -IconPath    $targetExe `
-                     -Description 'Claude Desktop - perfil por defecto'
-            $via = 'Exe'
-        }
     }
     else {
         $dataDir = Join-Path $env:APPDATA "Claude-$name"
@@ -696,21 +1113,57 @@ for ($i = 0; $i -lt $Profiles.Count; $i++) {
         if ($CopyMcpConfig) {
             Copy-McpConfig -DestinationDir $dataDir -Overwrite:$Force
         }
-        $lnk = New-ClaudeShortcut -Name $label `
-                 -Target      $targetExe `
-                 -Arguments   "--user-data-dir=`"$dataDir`"" `
-                 -IconPath    $targetExe `
-                 -Description "Claude Desktop - perfil aislado en $dataDir"
-        $via = 'Exe'
     }
 
-    $created += [pscustomobject]@{
-        Perfil       = $name
-        Acceso       = Split-Path -Leaf $lnk
-        Lanza        = $via
-        CarpetaDatos = $dataDir
+    if ($useStore) {
+        # El paquete de la Store se actualiza solo: no hace falta lanzador.
+        $lnk = New-ClaudeShortcut -Name $label `
+                 -Target      (Join-Path $env:WINDIR 'explorer.exe') `
+                 -Arguments   "shell:AppsFolder\$($install.Aumid)" `
+                 -IconPath    $iconPath `
+                 -Description 'Claude Desktop - perfil por defecto (paquete de la Store, con auto-update)'
+        $via = 'Store'
     }
-    Write-Ok $label
+    elseif ($NoLauncher) {
+        $arg = $(if ($i -eq 0) { '' } else { "--user-data-dir=`"$dataDir`"" })
+        $lnk = New-ClaudeShortcut -Name $label -Target $targetExe -Arguments $arg `
+                 -IconPath $iconPath -Description "Claude Desktop - perfil en $dataDir"
+        $via = 'Exe'
+    }
+    else {
+        $lnk = New-ClaudeShortcut -Name $label `
+                 -Target      $wscript `
+                 -Arguments   "`"$vbs`" `"$name`"" `
+                 -IconPath    $iconPath `
+                 -Description "Claude Desktop - perfil '$name' (comprueba actualizaciones al abrir)"
+        $via = 'Lanzador'
+    }
+
+    $cfgProfs += [pscustomobject]@{
+        name     = $name
+        dataDir  = $dataDir
+        useStore = [bool]$useStore
+        exe      = $targetExe
+        icon     = $iconPath
+    }
+    $created += [pscustomobject]@{
+        Perfil = $name
+        Color  = $color
+        Lanza  = $via
+        Acceso = Split-Path -Leaf $lnk
+    }
+    Write-Ok "$label  [$color]"
+}
+
+if (-not $NoLauncher) {
+    Write-LauncherConfig -HomePath $script:HomeDir -Config ([pscustomobject]@{
+        mode        = $install.Mode
+        aumid       = $install.Aumid
+        portableDir = $PortableDir
+        sourceExe   = $install.Exe
+        version     = $install.Version
+        profiles    = $cfgProfs
+    })
 }
 
 # --- Resumen -----------------------------------------------------------------
@@ -724,6 +1177,11 @@ Write-Host 'Como usarlo:' -ForegroundColor White
 Write-Note 'Abre el primer acceso directo -> es tu sesion de siempre.'
 Write-Note 'Abre el segundo -> pedira login. Entra con la otra cuenta.'
 Write-Note 'Ambas ventanas pueden estar abiertas al mismo tiempo.'
+Write-Note 'Cada acceso directo lleva una insignia de color con su inicial.'
+if (-not $NoLauncher) {
+    Write-Note 'Al abrir un perfil se comprueba si Claude tiene version nueva y,'
+    Write-Note 'si la hay, se actualiza la copia antes de arrancar la ventana.'
+}
 Write-Host ''
 Write-Host 'Importante:' -ForegroundColor Yellow
 Write-Note 'Cowork corre en una VM Hyper-V unica por maquina: solo una instancia'

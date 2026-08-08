@@ -25,7 +25,9 @@ Claude Desktop es una app Electron, y Electron acepta el parámetro `--user-data
 |------|---------|
 | 1. Detectar | Busca la instalación de Claude Desktop (installer `.exe` o paquete MSIX) y su versión |
 | 2. Copia portable | Solo si la instalación es MSIX: copia la app a `C:\ClaudePortable`, **o la actualiza si Claude cambió de versión** |
-| 3. Accesos directos | Crea un `.lnk` por perfil en el Escritorio, cada uno con su `--user-data-dir` |
+| 3. Iconos | Genera un `.ico` por perfil: el icono de Claude con una insignia de color y la inicial |
+| 4. Lanzador | Instala en `%APPDATA%\ClaudeMulti` un lanzador que comprueba la versión antes de abrir |
+| 5. Accesos directos | Crea un `.lnk` por perfil en el Escritorio, cada uno con su `--user-data-dir` |
 
 El **primer perfil** apunta a la carpeta por defecto (`%APPDATA%\Claude`), así conservas la sesión y los MCPs que ya tienes. Los siguientes usan `%APPDATA%\Claude-<Nombre>` y arrancan limpios.
 
@@ -33,9 +35,28 @@ En instalaciones MSIX el acceso directo del primer perfil **no** apunta a la cop
 
 ---
 
+## Iconos de color
+
+Cada perfil recibe su propio `.ico` en `%APPDATA%\ClaudeMulti\icons\`: el icono real de Claude con una insignia circular de color y la inicial del perfil. Los colores se asignan por orden y **nunca son naranjas** — el icono de Claude ya es coral y la insignia se volvería invisible.
+
+| Orden | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| Color | azul | verde | morado | cian | rosa | azabache | oliva |
+
+Los `.ico` son multi-resolución (256, 128, 64, 48, 32, 16 px), así que se distinguen igual en vista de iconos grandes que en lista.
+
+> **Limitación honesta:** el color solo afecta al acceso directo. Una vez abierta la ventana, el icono de la barra de tareas lo pone la propia app, y no se puede cambiar sin modificar el ejecutable.
+
+---
+
 ## Actualizaciones
 
-**Vuelve a hacer doble clic en `Setup-ClaudeMulti.bat` cuando quieras.** No hay nada más que hacer.
+Hay **dos** momentos en que se comprueba si Claude tiene versión nueva:
+
+1. **Al abrir cualquier perfil.** El acceso directo no apunta al `.exe`: apunta a un lanzador que primero compara versiones. Si Claude se actualizó, refresca la copia portable (mostrando una ventana con el progreso) y luego abre Claude. Si está al día, abre directo sin retraso perceptible.
+2. **Al ejecutar `Setup-ClaudeMulti.bat`**, como siempre.
+
+En ambos casos no hay nada que recordar hacer.
 
 Al copiar la app, el script deja un sello `C:\ClaudePortable\.claude-multi.json` con la versión copiada. En cada ejecución compara ese sello con la versión instalada:
 
@@ -44,11 +65,23 @@ Al copiar la app, el script deja un sello `C:\ClaudePortable\.claude-multi.json`
 | Misma versión | Nada. Termina en ~1 segundo. |
 | Claude se actualizó | Rehace la copia portable sola y avisa `1.26000 -> 1.26832`. |
 | Copia borrada, movida o corrupta | La rehace. |
-| Hay Claude abierto desde la copia portable | No toca nada y te pide cerrar esas ventanas. |
+| Hay Claude abierto desde la copia portable | No toca nada y abre igual (no se puede reemplazar un `.exe` en uso). |
 
 El primer perfil no depende de esto: se lanza por el paquete de la Store y Windows lo actualiza solo.
 
 `-Force` sigue existiendo para forzar la recopia aunque las versiones coincidan.
+
+### Qué se instala en `%APPDATA%\ClaudeMulti`
+
+| Archivo | Para qué |
+|---------|----------|
+| `launch.vbs` | Arranca el lanzador oculto, sin parpadeo de consola negra |
+| `Launch-ClaudeProfile.ps1` | Compara versiones, actualiza si toca y abre el perfil |
+| `Setup-ClaudeMulti.ps1` | Copia del script, para que el lanzador pueda actualizar aunque muevas el repositorio |
+| `config.json` | Perfiles, rutas y modo de instalación |
+| `icons\*.ico` | Un icono por perfil |
+
+Con `-NoLauncher` los accesos directos apuntan al `.exe` directamente (comportamiento clásico, sin comprobación al abrir). Los iconos de color se siguen aplicando.
 
 ---
 
@@ -92,7 +125,8 @@ Ambos deben quedar **en la misma carpeta**.
 | `-Profiles` | `'Cuenta1','Cuenta2'` | Nombres de los perfiles. Acepta más de dos. Se validan (sin caracteres inválidos ni duplicados). |
 | `-PortableDir` | `C:\ClaudePortable` | Destino de la copia portable (solo MSIX). |
 | `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. Solo esa clave: no arrastra sesión, credenciales ni preferencias ligadas a tu cuenta. |
-| `-Revert` | — | Deshace todo: accesos directos, carpetas de los perfiles extra y copia portable. |
+| `-NoLauncher` | — | Los accesos directos apuntan al `.exe` directamente, sin comprobar versión al abrir. |
+| `-Revert` | — | Deshace todo: accesos directos, carpetas de los perfiles extra, `%APPDATA%\ClaudeMulti` y copia portable. |
 | `-GrantWindowsAppsRead` | — | Autoriza sin preguntar el `takeown`+`icacls` sobre `WindowsApps`. Solo para ejecución desatendida. |
 | `-Force` | — | Fuerza la recopia aunque la versión coincida, sobrescribe la config MCP ya copiada y, con `-Revert`, borra sin preguntar. |
 
@@ -137,7 +171,7 @@ Crear un **segundo usuario de Windows** y usar *Ejecutar como otro usuario* (Shi
 powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo' -Revert
 ```
 
-Usa los **mismos** `-Profiles` (y `-PortableDir`, si lo cambiaste) que al instalar. Borra los accesos directos, las carpetas `%APPDATA%\Claude-<Perfil>` de los perfiles extra y la copia portable. Pide confirmación antes de borrar datos de perfiles; añade `-Force` para saltarla o `-WhatIf` para solo ver la lista.
+Usa los **mismos** `-Profiles` (y `-PortableDir`, si lo cambiaste) que al instalar. Borra los accesos directos, las carpetas `%APPDATA%\Claude-<Perfil>` de los perfiles extra, `%APPDATA%\ClaudeMulti` (lanzador e iconos) y la copia portable. Pide confirmación antes de borrar datos de perfiles; añade `-Force` para saltarla o `-WhatIf` para solo ver la lista.
 
 El perfil original en `%APPDATA%\Claude` nunca se toca.
 
