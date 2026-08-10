@@ -1006,12 +1006,280 @@ function Get-ConfiguredProfiles {
     return @()
 }
 
+function Get-ConfiguredProfileObjects {
+    $cfgFile = Join-Path $script:HomeDir 'config.json'
+    if (Test-Path -LiteralPath $cfgFile) {
+        try {
+            $cfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+            if ($cfg.profiles) {
+                return @($cfg.profiles)
+            }
+        } catch { }
+    }
+    return @()
+}
+
+function Get-ProfileNote {
+    param([string]$Name)
+    $profs = Get-ConfiguredProfileObjects
+    $found = $profs | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+    if ($found -and $found.note) { return $found.note }
+    return $null
+}
+
+function Edit-ProfileNotes {
+    $profs = Get-ConfiguredProfileObjects
+    if ($profs.Count -eq 0) {
+        Write-Warn (Get-I18nStr 'NotFound')
+        return
+    }
+
+    Write-Host ''
+    Write-Host '--- Asignar Nota / Correo a Perfil ---' -ForegroundColor Cyan
+    for ($i = 0; $i -lt $profs.Count; $i++) {
+        $noteStr = $(if ($profs[$i].note) { " ($($profs[$i].note))" } else { '' })
+        Write-Host "  [$($i+1)] $($profs[$i].name)$noteStr"
+    }
+    Write-Host ''
+    $sel = Read-Host 'Selecciona el numero de perfil a editar (vacio para cancelar)'
+    [int]$idx = 0
+    if ([int]::TryParse($sel, [ref]$idx) -and $idx -ge 1 -and $idx -le $profs.Count) {
+        $targetProf = $profs[$idx - 1]
+        $newNote = Read-Host "Ingresa la nota/correo para '$($targetProf.name)' (vacio para borrar)"
+        if ($targetProf.PSObject.Properties.Name -contains 'note') {
+            $targetProf.note = $newNote.Trim()
+        } else {
+            $targetProf | Add-Member -NotePropertyName 'note' -NotePropertyValue $newNote.Trim()
+        }
+
+        $cfgFile = Join-Path $script:HomeDir 'config.json'
+        if (Test-Path -LiteralPath $cfgFile) {
+            try {
+                $cfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+                $cfg.profiles = $profs
+                $json = $cfg | ConvertTo-Json -Depth 8
+                [IO.File]::WriteAllText($cfgFile, $json, (New-Object Text.UTF8Encoding($false)))
+                Write-Ok "Nota de '$($targetProf.name)' actualizada."
+            } catch {
+                Write-Warn "No se pudo actualizar config.json: $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Invoke-HealthCheck {
+    Write-Host ''
+    Write-Host '=============================================================' -ForegroundColor White
+    Write-Host '  Diagnostico de Salud del Sistema (Health Check)' -ForegroundColor White
+    Write-Host '=============================================================' -ForegroundColor White
+
+    $install = Get-ClaudeInstall
+    if ($install) {
+        Write-Ok "Ejecutable principal: $($install.Exe)"
+        Write-Ok "Modo de instalacion: $($install.Mode)"
+        if ($install.Version) { Write-Ok "Version instalada: $($install.Version)" }
+    } else {
+        Write-Err 'No se detecto instalacion activa de Claude Desktop.'
+    }
+
+    if (Test-Path -LiteralPath $script:HomeDir) {
+        Write-Ok "Carpeta de lanzadores e iconos: $script:HomeDir [OK]"
+    } else {
+        Write-Warn "No existe la carpeta de lanzadores: $script:HomeDir"
+    }
+
+    $profs = Get-ConfiguredProfileObjects
+    if ($profs.Count -gt 0) {
+        Write-Host "`nEstado de perfiles configurados:" -ForegroundColor Cyan
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        foreach ($p in $profs) {
+            $n = $p.name
+            $dataDir = $p.dataDir
+            $exists = Test-Path -LiteralPath $dataDir
+            $sizeMB = 0
+            if ($exists) {
+                try {
+                    $bytes = (Get-ChildItem -LiteralPath $dataDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                    $sizeMB = [math]::Round(($bytes / 1MB), 1)
+                } catch { }
+            }
+            $lnkOriginal = Join-Path $desktop "Claude - $n (perfil actual).lnk"
+            $lnkExtra    = Join-Path $desktop "Claude - $n.lnk"
+            $hasLnk      = (Test-Path -LiteralPath $lnkOriginal) -or (Test-Path -LiteralPath $lnkExtra)
+            
+            $noteStr = $(if ($p.note) { " ($($p.note))" } else { '' })
+            $statusStr = $(if ($exists) { "$sizeMB MB" } else { 'No creada' })
+            $lnkStr    = $(if ($hasLnk) { 'Acceso directo [OK]' } else { 'Acceso directo [FALTA]' })
+
+            if ($exists -and $hasLnk) {
+                Write-Ok "$n$noteStr -> $statusStr | $lnkStr"
+            } else {
+                Write-Warn "$n$noteStr -> $statusStr | $lnkStr"
+            }
+        }
+    } else {
+        Write-Note 'No hay perfiles configurados actualmente.'
+    }
+
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' }
+    Write-Host "`nProcesos de Claude en ejecucion: $($procs.Count)" -ForegroundColor Gray
+    Write-Host ''
+}
+
+function Clear-ProfileCache {
+    Write-Host ''
+    Write-Host '--- Limpiador de Cache y Archivos Temporales ---' -ForegroundColor Cyan
+
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' }
+    if ($procs.Count -gt 0) {
+        Write-Warn "Hay $($procs.Count) proceso(s) de Claude en ejecucion."
+        Write-Warn 'Cierra todas las ventanas de Claude antes de limpiar la cache.'
+        return
+    }
+
+    $targets = @()
+    $mainDir = Join-Path $env:APPDATA 'Claude'
+    if (Test-Path -LiteralPath $mainDir) { $targets += $mainDir }
+    Get-ChildItem -LiteralPath $env:APPDATA -Filter 'Claude-*' -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $targets += $_.FullName
+    }
+
+    if ($targets.Count -eq 0) {
+        Write-Note 'No se encontraron carpetas de perfiles para limpiar.'
+        return
+    }
+
+    $cacheSubdirs = @('Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'blob_storage', 'Crashpad', 'logs')
+    [long]$totalFreedBytes = 0
+
+    foreach ($dir in $targets) {
+        foreach ($sub in $cacheSubdirs) {
+            $path = Join-Path $dir $sub
+            if (Test-Path -LiteralPath $path) {
+                try {
+                    $bytes = (Get-ChildItem -LiteralPath $path -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+                    $totalFreedBytes += $bytes
+                } catch { }
+            }
+        }
+    }
+
+    $freedMB = [math]::Round(($totalFreedBytes / 1MB), 2)
+    Write-Ok "Limpieza completada. Espacio en disco liberado: $freedMB MB"
+    Write-Host ''
+}
+
+function Export-ProfileBackup {
+    Write-Host ''
+    Write-Host '--- Respaldar Perfiles (Backup .zip) ---' -ForegroundColor Cyan
+
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    $timestamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
+    $zipPath = Join-Path $desktop "ClaudeMulti_Backup_$timestamp.zip"
+
+    $tempDir = Join-Path $env:TEMP "ClaudeMulti_Backup_$timestamp"
+    if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+    try {
+        if (Test-Path -LiteralPath $script:HomeDir) {
+            Copy-Item -LiteralPath $script:HomeDir -Destination (Join-Path $tempDir 'ClaudeMulti') -Recurse -Force
+        }
+
+        $profDir = Join-Path $tempDir 'Profiles'
+        New-Item -ItemType Directory -Path $profDir -Force | Out-Null
+
+        $targets = @()
+        $mainDir = Join-Path $env:APPDATA 'Claude'
+        if (Test-Path -LiteralPath $mainDir) { Copy-Item -LiteralPath $mainDir -Destination (Join-Path $profDir 'Claude') -Recurse -Force }
+        Get-ChildItem -LiteralPath $env:APPDATA -Filter 'Claude-*' -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $profDir $_.Name) -Recurse -Force
+        }
+
+        # Excluir cache pesada dentro de la copia de backup
+        $cacheSubdirs = @('Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'blob_storage', 'Crashpad', 'logs')
+        Get-ChildItem -LiteralPath $profDir -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $cacheSubdirs -contains $_.Name } | ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        Compress-Archive -Path "$tempDir\*" -DestinationPath $zipPath -Force
+        $zipBytes = (Get-Item -LiteralPath $zipPath).Length
+        $zipMB = [math]::Round(($zipBytes / 1MB), 2)
+
+        Write-Ok "Backup creado exitosamente en el Escritorio:"
+        Write-Note "$zipPath ($zipMB MB)"
+    }
+    catch {
+        Write-Err "Error al crear el backup: $($_.Exception.Message)"
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    Write-Host ''
+}
+
+function Import-ProfileBackup {
+    Write-Host ''
+    Write-Host '--- Restaurar Perfiles desde Backup (.zip) ---' -ForegroundColor Cyan
+
+    $zipPath = Read-Host 'Ingresa la ruta completa del archivo .zip de backup'
+    if ([string]::IsNullOrWhiteSpace($zipPath)) { return }
+    $zipPath = $zipPath.Trim('"').Trim("'")
+
+    if (-not (Test-Path -LiteralPath $zipPath)) {
+        Write-Warn "No se encontro el archivo: $zipPath"
+        return
+    }
+
+    $tempDir = Join-Path $env:TEMP "ClaudeMulti_Restore_$(Get-Random)"
+    if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+    try {
+        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+
+        $homeBackup = Join-Path $tempDir 'ClaudeMulti'
+        if (Test-Path -LiteralPath $homeBackup) {
+            Copy-Item -LiteralPath $homeBackup -Destination $script:HomeDir -Recurse -Force
+            Write-Ok "Configuracion de lanzador restaurada."
+        }
+
+        $profBackup = Join-Path $tempDir 'Profiles'
+        if (Test-Path -LiteralPath $profBackup) {
+            Get-ChildItem -LiteralPath $profBackup -Directory | ForEach-Object {
+                $targetAppData = Join-Path $env:APPDATA $_.Name
+                Copy-Item -LiteralPath $_.FullName -Destination $targetAppData -Recurse -Force
+                Write-Ok "Restaurado perfil: $($_.Name)"
+            }
+        }
+
+        Write-Ok 'Restauracion completada exitosamente.'
+        Write-Note 'Se recomienda ejecutar la opcion [1] del menu para reconstruir accesos directos.'
+    }
+    catch {
+        Write-Err "Error al restaurar el backup: $($_.Exception.Message)"
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    Write-Host ''
+}
+
 function Show-InteractiveMenu {
-    $configured = Get-ConfiguredProfiles
+    $configuredObjs = Get-ConfiguredProfileObjects
+    $configured = @($configuredObjs | ForEach-Object { $_.name })
     $current = $(if ($configured.Count -gt 0) { $configured } else { @('Cuenta1', 'Cuenta2', 'Cuenta3') })
 
     while ($true) {
-        $currStr = $current -join ', '
+        $displayList = @()
+        foreach ($c in $current) {
+            $note = Get-ProfileNote -Name $c
+            if ($note) { $displayList += "$c ($note)" }
+            else { $displayList += $c }
+        }
+        $currStr = $displayList -join ', '
+
         Write-Host ''
         Write-Host '=============================================================' -ForegroundColor White
         Write-Host ("  " + (Get-I18nStr 'MenuTitle')) -ForegroundColor White
@@ -1019,14 +1287,19 @@ function Show-InteractiveMenu {
         Write-Host ("  " + (Get-I18nStr 'CurrentInstances') + ": [ $currStr ]") -ForegroundColor Cyan
         Write-Host ("  " + (Get-I18nStr 'CopyMcpsLabel') + ":        $(if ($script:CopyMcpConfig) { 'SI' } else { 'NO' })") -ForegroundColor Gray
         Write-Host ''
-        Write-Host ("  [1] " + (Get-I18nStr 'MenuOpt1' @($currStr))) -ForegroundColor Yellow
-        Write-Host ("  [2] " + (Get-I18nStr 'MenuOpt2'))
-        Write-Host ("  [3] " + (Get-I18nStr 'MenuOpt3'))
-        Write-Host ("  [4] " + (Get-I18nStr 'MenuOpt4'))
-        Write-Host ("  [5] " + (Get-I18nStr 'MenuOpt5'))
-        Write-Host ("  [6] " + (Get-I18nStr 'MenuOpt6'))
+        Write-Host "  [1] Ejecutar / Actualizar instalacion actual ($currStr)" -ForegroundColor Yellow
+        Write-Host '  [2] Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
+        Write-Host '  [3] Anadir una nueva instancia / perfil (ej: "Cuenta4" o "Trabajo")'
+        Write-Host '  [4] Asignar nota / correo a un perfil (ej: trabajo@empresa.com)' -ForegroundColor Green
+        Write-Host '  [5] Diagnostico de salud del sistema (Health Check)' -ForegroundColor Green
+        Write-Host '  [6] Limpiar cache y archivos temporales (liberar espacio en disco)' -ForegroundColor Green
+        Write-Host '  [7] Crear Backup de perfiles (.zip)' -ForegroundColor Green
+        Write-Host '  [8] Restaurar perfiles desde Backup (.zip)' -ForegroundColor Green
+        Write-Host '  [9] Alternar copia de MCPs a nuevos perfiles'
+        Write-Host '  [10] Revertir / Eliminar perfiles'
+        Write-Host '  [0] Salir'
         Write-Host ''
-        $opt = Read-Host (Get-I18nStr 'SelectOpt')
+        $opt = Read-Host 'Selecciona una opcion (0-10)'
 
         switch ($opt.Trim()) {
             '1' {
@@ -1066,10 +1339,25 @@ function Show-InteractiveMenu {
                 }
             }
             '4' {
+                Edit-ProfileNotes
+            }
+            '5' {
+                Invoke-HealthCheck
+            }
+            '6' {
+                Clear-ProfileCache
+            }
+            '7' {
+                Export-ProfileBackup
+            }
+            '8' {
+                Import-ProfileBackup
+            }
+            '9' {
                 $script:CopyMcpConfig = -not $script:CopyMcpConfig
                 Write-Ok (if ($script:CopyMcpConfig) { Get-I18nStr 'CopyMcpsActive' } else { Get-I18nStr 'CopyMcpsInactive' })
             }
-            '5' {
+            '10' {
                 Write-Host ''
                 Write-Warn (Get-I18nStr 'WarnDeleteData')
                 $ans = Read-Host (Get-I18nStr 'ConfirmRevert')
@@ -1077,7 +1365,7 @@ function Show-InteractiveMenu {
                     return @{ Profiles = $current; Revert = $true }
                 }
             }
-            '6' {
+            '0' {
                 Write-Host (Get-I18nStr 'OpCancelled')
                 exit 0
             }
@@ -1361,19 +1649,22 @@ for ($i = 0; $i -lt $Profiles.Count; $i++) {
         }
     }
 
+    $note    = Get-ProfileNote -Name $name
+    $noteStr = $(if ($note) { " ($note)" } else { '' })
+
     if ($useStore) {
         # El paquete de la Store se actualiza solo: no hace falta lanzador.
         $lnk = New-ClaudeShortcut -Name $label `
                  -Target      (Join-Path $env:WINDIR 'explorer.exe') `
                  -Arguments   "shell:AppsFolder\$($install.Aumid)" `
                  -IconPath    $iconPath `
-                 -Description 'Claude Desktop - perfil por defecto (paquete de la Store, con auto-update)'
+                 -Description "Claude Desktop - perfil '$name'$noteStr (paquete de la Store)"
         $via = 'Store'
     }
     elseif ($NoLauncher) {
         $arg = $(if ($i -eq 0) { '' } else { "--user-data-dir=`"$dataDir`"" })
         $lnk = New-ClaudeShortcut -Name $label -Target $targetExe -Arguments $arg `
-                 -IconPath $iconPath -Description "Claude Desktop - perfil en $dataDir"
+                 -IconPath $iconPath -Description "Claude Desktop - perfil '$name'$noteStr en $dataDir"
         $via = 'Exe'
     }
     else {
@@ -1381,12 +1672,13 @@ for ($i = 0; $i -lt $Profiles.Count; $i++) {
                  -Target      $wscript `
                  -Arguments   "`"$vbs`" `"$name`"" `
                  -IconPath    $iconPath `
-                 -Description "Claude Desktop - perfil '$name' (comprueba actualizaciones al abrir)"
+                 -Description "Claude Desktop - perfil '$name'$noteStr (comprueba actualizaciones al abrir)"
         $via = 'Lanzador'
     }
 
     $cfgProfs += [pscustomobject]@{
         name     = $name
+        note     = $note
         dataDir  = $dataDir
         useStore = [bool]$useStore
         exe      = $targetExe
