@@ -66,10 +66,150 @@ param(
     [switch]  $NoLauncher,
     [switch]  $GrantWindowsAppsRead,
     [switch]  $Revert,
-    [switch]  $Force
+    [switch]  $Force,
+    [string]  $Language    = $null
 )
 
 $ErrorActionPreference = 'Stop'
+
+# --- Idioma e Internacionalizacion (i18n) -------------------------------------
+$script:Lang = 'en'
+if (-not [string]::IsNullOrWhiteSpace($Language)) {
+    if ($Language -match '^es') { $script:Lang = 'es' }
+    else { $script:Lang = 'en' }
+}
+else {
+    try {
+        $uiCulture = [System.Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName
+        if ($uiCulture -eq 'es') { $script:Lang = 'es' }
+    } catch {
+        $script:Lang = 'en'
+    }
+}
+
+$script:I18n = @{
+    es = @{
+        HeaderTitle          = 'Claude Desktop - configuracion de multiples instancias'
+        MenuTitle            = 'Claude Desktop - Multi Instancia (Menu)'
+        CurrentInstances     = 'Instancias configuradas actualmente'
+        CopyMcpsLabel        = 'Copiar MCPs (-CopyMcpConfig)'
+        MenuOpt1             = 'Ejecutar / Actualizar instalacion actual ({0})'
+        MenuOpt2             = 'Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
+        MenuOpt3             = 'Anadir una nueva instancia / perfil (ej: "Cuenta4" o "Trabajo")'
+        MenuOpt4             = 'Alternar copia de MCPs a nuevos perfiles'
+        MenuOpt5             = 'Revertir / Eliminar perfiles'
+        MenuOpt6             = 'Salir'
+        SelectOpt            = 'Selecciona una opcion (1-6)'
+        EnterTotalNum        = 'Ingresa el numero total de instancias deseado (ej: 4)'
+        InvalidNum           = 'Numero no valido.'
+        EnterNewName         = 'Ingresa el nombre del nuevo perfil o instancia (ej: Cuenta4 o Trabajo)'
+        ProfileExists        = 'El perfil "{0}" ya existe.'
+        NameCannotBeEmpty    = 'El nombre no puede estar vacio.'
+        CopyMcpsActive       = 'Copia de MCPs: ACTIVADA'
+        CopyMcpsInactive     = 'Copia de MCPs: DESACTIVADA'
+        WarnDeleteData       = 'Se eliminaran accesos directos y datos de perfiles extra.'
+        ConfirmRevert        = 'Confirmas revertir la configuracion? (S/N)'
+        OpCancelled          = 'Operacion cancelada.'
+        InvalidOpt           = 'Opcion invalida.'
+        SearchingInstall     = 'Buscando la instalacion de Claude Desktop...'
+        NotFound             = 'No se encontro Claude Desktop en este equipo.'
+        InstallMode          = 'Modo de instalacion: {0}'
+        FolderLabel          = 'Carpeta: {0}'
+        InstalledVer         = 'Version instalada: {0}'
+        MsixDetected         = 'Instalacion tipo MSIX detectada (Microsoft Store).'
+        MsixNote             = 'Windows no permite lanzar el .exe desde WindowsApps con parametros, asi que hay que hacer una copia portable en una carpeta normal.'
+        PortableUpToDate     = 'Copia portable al dia (version {0}). No hay nada que actualizar.'
+        GeneratingIcons      = 'Generando iconos de color por perfil...'
+        InstallingLauncher   = 'Instalando lanzador (comprueba actualizaciones antes de abrir)...'
+        CreatingShortcuts    = 'Creando accesos directos en el Escritorio...'
+        ShortcutExists       = 'Ya existia "{0}.lnk" en el Escritorio: se sobrescribe.'
+        ProfileLabelOriginal = 'Claude - {0} (perfil actual)'
+        ProfileLabelExtra    = 'Claude - {0}'
+        ReadyTitle           = 'Listo'
+        HeaderPerfil         = 'Perfil'
+        HeaderColor          = 'Color'
+        HeaderLanza          = 'Lanza'
+        HeaderAcceso         = 'Acceso'
+        HowToUse             = 'Como usarlo:'
+        UseFirstLnk          = 'Abre el primer acceso directo -> es tu sesion de siempre.'
+        UseOtherLnks         = 'Abre los accesos directos de las otras cuentas -> pediran login. Entra con cada cuenta.'
+        AllWindowsOpen       = 'Las ventanas pueden estar abiertas al mismo tiempo.'
+        BadgeNote            = 'Cada acceso directo lleva una insignia de color con su inicial.'
+        UpdateCheckNote      = 'Al abrir un perfil se comprueba si Claude tiene version nueva y la actualiza.'
+        ImportantTitle       = 'ImportantTitle'
+        CoworkNote           = 'Cowork corre en una VM Hyper-V unica por maquina: solo una instancia puede usar Cowork a la vez.'
+        NoMcpNote            = 'Los perfiles nuevos arrancan SIN MCP servers. Usa -CopyMcpConfig para copiar los del perfil por defecto.'
+        StoreNote            = 'El primer perfil se lanza por el paquete de la Store: se actualiza solo.'
+        RevertCmdNote        = 'Para revertir: vuelve a correr este script con -Revert.'
+    }
+    en = @{
+        HeaderTitle          = 'Claude Desktop - Multi-Instance Setup'
+        MenuTitle            = 'Claude Desktop - Multi-Instance (Menu)'
+        CurrentInstances     = 'Currently configured instances'
+        CopyMcpsLabel        = 'Copy MCPs (-CopyMcpConfig)'
+        MenuOpt1             = 'Run / Update current installation ({0})'
+        MenuOpt2             = 'Specify total number of instances (e.g. 4 -> Cuenta1..Cuenta4)'
+        MenuOpt3             = 'Add a new instance / profile (e.g. "Cuenta4" or "Work")'
+        MenuOpt4             = 'Toggle copying MCPs to new profiles'
+        MenuOpt5             = 'Revert / Delete profiles'
+        MenuOpt6             = 'Exit'
+        SelectOpt            = 'Select an option (1-6)'
+        EnterTotalNum        = 'Enter desired total number of instances (e.g. 4)'
+        InvalidNum           = 'Invalid number.'
+        EnterNewName         = 'Enter name for the new profile or instance (e.g. Cuenta4 or Work)'
+        ProfileExists        = 'Profile "{0}" already exists.'
+        NameCannotBeEmpty    = 'Name cannot be empty.'
+        CopyMcpsActive       = 'Copy MCPs: ENABLED'
+        CopyMcpsInactive     = 'Copy MCPs: DISABLED'
+        WarnDeleteData       = 'Shortcuts and extra profile data will be deleted.'
+        ConfirmRevert        = 'Are you sure you want to revert configuration? (Y/N)'
+        OpCancelled          = 'Operation cancelled.'
+        InvalidOpt           = 'Invalid option.'
+        SearchingInstall     = 'Searching for Claude Desktop installation...'
+        NotFound             = 'Claude Desktop was not found on this computer.'
+        InstallMode          = 'Installation mode: {0}'
+        FolderLabel          = 'Folder: {0}'
+        InstalledVer         = 'Installed version: {0}'
+        MsixDetected         = 'MSIX installation detected (Microsoft Store).'
+        MsixNote             = 'Windows does not allow launching the .exe from WindowsApps with parameters, so a portable copy is made to a normal folder.'
+        PortableUpToDate     = 'Portable copy up to date (version {0}). Nothing to update.'
+        GeneratingIcons      = 'Generating colored icons per profile...'
+        InstallingLauncher   = 'Installing launcher (checks for updates before opening)...'
+        CreatingShortcuts    = 'Creating desktop shortcuts...'
+        ShortcutExists       = '"{0}.lnk" already exists on Desktop: overwriting.'
+        ProfileLabelOriginal = 'Claude - {0} (current profile)'
+        ProfileLabelExtra    = 'Claude - {0}'
+        ReadyTitle           = 'Ready'
+        HeaderPerfil         = 'Profile'
+        HeaderColor          = 'Color'
+        HeaderLanza          = 'Launcher'
+        HeaderAcceso         = 'Shortcut'
+        HowToUse             = 'How to use it:'
+        UseFirstLnk          = 'Open the first shortcut -> this is your usual session.'
+        UseOtherLnks         = 'Open shortcuts for other accounts -> they will prompt for login.'
+        AllWindowsOpen       = 'All windows can be open at the same time.'
+        BadgeNote            = 'Each shortcut has a colored badge with its initial.'
+        UpdateCheckNote      = 'Opening a profile checks if Claude has a new version and updates it.'
+        ImportantTitle       = 'Important:'
+        CoworkNote           = 'Cowork runs in a single Hyper-V VM per machine: only one instance can use Cowork at a time.'
+        NoMcpNote            = 'New profiles start WITHOUT MCP servers. Use -CopyMcpConfig to copy them from default profile.'
+        StoreNote            = 'The first profile launches via the Store package: updates automatically.'
+        RevertCmdNote        = 'To revert: run this script again with -Revert.'
+    }
+}
+
+function Get-I18nStr {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [object[]]$Args
+    )
+    $lang = $script:Lang
+    if (-not $script:I18n.ContainsKey($lang)) { $lang = 'en' }
+    $str = $script:I18n[$lang][$Key]
+    if (-not $str) { $str = $script:I18n['en'][$Key] }
+    if ($Args -and $Args.Count -gt 0) { return ($str -f $Args) }
+    return $str
+}
 
 # ---------------------------------------------------------------- helpers ---
 
@@ -759,8 +899,8 @@ function Write-LauncherConfig {
 
 function Get-ProfileLabel {
     param([string]$Name, [int]$Index)
-    if ($Index -eq 0) { return "Claude - $Name (perfil actual)" }
-    return "Claude - $Name"
+    if ($Index -eq 0) { return (Get-I18nStr 'ProfileLabelOriginal' @($Name)) }
+    return (Get-I18nStr 'ProfileLabelExtra' @($Name))
 }
 
 function Invoke-Revert {
@@ -874,19 +1014,19 @@ function Show-InteractiveMenu {
         $currStr = $current -join ', '
         Write-Host ''
         Write-Host '=============================================================' -ForegroundColor White
-        Write-Host '  Claude Desktop - Multi Instancia (Menu)' -ForegroundColor White
+        Write-Host ("  " + (Get-I18nStr 'MenuTitle')) -ForegroundColor White
         Write-Host '=============================================================' -ForegroundColor White
-        Write-Host "  Instancias configuradas actualmente: [ $currStr ]" -ForegroundColor Cyan
-        Write-Host "  Copiar MCPs (-CopyMcpConfig):        $(if ($script:CopyMcpConfig) { 'SI' } else { 'NO' })" -ForegroundColor Gray
+        Write-Host ("  " + (Get-I18nStr 'CurrentInstances') + ": [ $currStr ]") -ForegroundColor Cyan
+        Write-Host ("  " + (Get-I18nStr 'CopyMcpsLabel') + ":        $(if ($script:CopyMcpConfig) { 'SI' } else { 'NO' })") -ForegroundColor Gray
         Write-Host ''
-        Write-Host "  [1] Ejecutar / Actualizar instalacion actual ($currStr)" -ForegroundColor Yellow
-        Write-Host '  [2] Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
-        Write-Host '  [3] Anadir una nueva instancia / perfil (ej: "Cuenta4" o "Trabajo")'
-        Write-Host '  [4] Alternar copia de MCPs a nuevos perfiles'
-        Write-Host '  [5] Revertir / Eliminar perfiles'
-        Write-Host '  [6] Salir'
+        Write-Host ("  [1] " + (Get-I18nStr 'MenuOpt1' @($currStr))) -ForegroundColor Yellow
+        Write-Host ("  [2] " + (Get-I18nStr 'MenuOpt2'))
+        Write-Host ("  [3] " + (Get-I18nStr 'MenuOpt3'))
+        Write-Host ("  [4] " + (Get-I18nStr 'MenuOpt4'))
+        Write-Host ("  [5] " + (Get-I18nStr 'MenuOpt5'))
+        Write-Host ("  [6] " + (Get-I18nStr 'MenuOpt6'))
         Write-Host ''
-        $opt = Read-Host 'Selecciona una opcion (1-6)'
+        $opt = Read-Host (Get-I18nStr 'SelectOpt')
 
         switch ($opt.Trim()) {
             '1' {
@@ -894,7 +1034,7 @@ function Show-InteractiveMenu {
             }
             '2' {
                 Write-Host ''
-                $numStr = Read-Host 'Ingresa el numero total de instancias deseado (ej: 4)'
+                $numStr = Read-Host (Get-I18nStr 'EnterTotalNum')
                 [int]$num = 0
                 if ([int]::TryParse($numStr, [ref]$num) -and $num -ge 1) {
                     $newList = @()
@@ -907,42 +1047,42 @@ function Show-InteractiveMenu {
                     }
                     return @{ Profiles = $newList }
                 } else {
-                    Write-Warn 'Numero no valido.'
+                    Write-Warn (Get-I18nStr 'InvalidNum')
                 }
             }
             '3' {
                 Write-Host ''
-                $newName = Read-Host 'Ingresa el nombre del nuevo perfil o instancia (ej: Cuenta4 o Trabajo)'
+                $newName = Read-Host (Get-I18nStr 'EnterNewName')
                 if ($newName) { $newName = $newName.Trim() }
                 if (-not [string]::IsNullOrWhiteSpace($newName)) {
                     if ($current -contains $newName) {
-                        Write-Warn "El perfil '$newName' ya existe."
+                        Write-Warn (Get-I18nStr 'ProfileExists' @($newName))
                     } else {
                         $newList = @($current) + $newName
                         return @{ Profiles = $newList }
                     }
                 } else {
-                    Write-Warn 'El nombre no puede estar vacio.'
+                    Write-Warn (Get-I18nStr 'NameCannotBeEmpty')
                 }
             }
             '4' {
                 $script:CopyMcpConfig = -not $script:CopyMcpConfig
-                Write-Ok "Copia de MCPs: $(if ($script:CopyMcpConfig) { 'ACTIVADA' } else { 'DESACTIVADA' })"
+                Write-Ok (if ($script:CopyMcpConfig) { Get-I18nStr 'CopyMcpsActive' } else { Get-I18nStr 'CopyMcpsInactive' })
             }
             '5' {
                 Write-Host ''
-                Write-Warn 'Se eliminaran accesos directos y datos de perfiles extra.'
-                $ans = Read-Host 'Confirmas revertir la configuracion? (S/N)'
-                if ($ans -eq 'S' -or $ans -eq 's') {
+                Write-Warn (Get-I18nStr 'WarnDeleteData')
+                $ans = Read-Host (Get-I18nStr 'ConfirmRevert')
+                if ($ans -eq 'S' -or $ans -eq 's' -or $ans -eq 'Y' -or $ans -eq 'y') {
                     return @{ Profiles = $current; Revert = $true }
                 }
             }
             '6' {
-                Write-Host 'Operacion cancelada.'
+                Write-Host (Get-I18nStr 'OpCancelled')
                 exit 0
             }
             default {
-                Write-Warn 'Opcion invalida.'
+                Write-Warn (Get-I18nStr 'InvalidOpt')
             }
         }
     }
@@ -952,7 +1092,7 @@ function Show-InteractiveMenu {
 
 Write-Host ''
 Write-Host '=============================================================' -ForegroundColor White
-Write-Host '  Claude Desktop - configuracion de multiples instancias' -ForegroundColor White
+Write-Host ("  " + (Get-I18nStr 'HeaderTitle')) -ForegroundColor White
 Write-Host '=============================================================' -ForegroundColor White
 
 if (-not $PSBoundParameters.ContainsKey('Profiles') -and -not $Revert) {
