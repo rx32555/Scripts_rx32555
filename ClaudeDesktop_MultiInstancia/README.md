@@ -110,20 +110,18 @@ Ambos deben quedar **en la misma carpeta**.
 ### Uso
 
 1. Doble clic en `Setup-ClaudeMulti.bat`.
-2. Se desplegará un **menú interactivo** con 10+ funciones avanzadas:
-   - **[1] Ejecutar / Actualizar instalacion actual**: Configura los accesos directos e iconos de los perfiles activos.
-   - **[2] Especificar cantidad total de instancias**: Permite definir N instancias (ej: `4` -> `Cuenta1` a `Cuenta4`).
-   - **[3] Anadir una nueva instancia**: Suma una nueva cuenta personalizada (ej: `Trabajo`) manteniendo intactos los datos de las demás.
-   - **[4] Asignar nota / correo a un perfil**: Asocia etiquetas o emails (ej: `usuario@empresa.com`) a cualquier perfil para identificarlos.
-   - **[5] Diagnostico de Salud (Health Check)**: Escanea el sistema, verifica ejecutables, accesos directos, espacio ocupado y procesos activos.
-   - **[6] Limpiar cache y temporales**: Libera espacio en disco eliminando caches secundarias de Electron sin cerrar la sesión.
-   - **[7] Crear Backup (.zip)**: Genera un paquete comprimido en el Escritorio con todas las sesiones y configuraciones.
-   - **[8] Restaurar Backup (.zip)**: Restaura perfiles previamente respaldados.
-   - **[9] Alternar copia de MCPs**: Activa/Desactiva la copia del nodo `mcpServers` a nuevos perfiles (`-CopyMcpConfig`).
-   - **[10] Revertir / Eliminar perfiles**: Elimina accesos directos y carpetas de perfiles secundarios.
-3. Si el script avisa que necesita Administrador (caso Microsoft Store), ciérralo y ábrelo con botón derecho → **Ejecutar como administrador**.
-4. En el Escritorio aparecerán los accesos directos para cada cuenta (ej: `Claude - Cuenta1 (perfil actual)`, `Claude - Cuenta2 (trabajo@empresa.com)`).
-5. Todas las ventanas pueden estar abiertas simultáneamente sin interferir entre sí.
+2. Se abrirá la **Interfaz Gráfica de Usuario (GUI nativa)** con un panel de escritorio:
+   - **Lista de Perfiles Activos**: Muestra cada cuenta con sus notas o correos asignados.
+   - **Botonera de Acciones**:
+     - ▶ **Ejecutar / Actualizar Instancias**: Configura e instala las instancias.
+     - **+ Anadir Perfil**: Crea una nueva cuenta personalizada (`Trabajo`, `Cuenta4`, etc.) manteniendo intactas las existentes.
+     - **Editar Nota/Email**: Asigna una dirección o nota (ej. `trabajo@empresa.com`) a cualquier perfil.
+     - **Health Check**: Diagnóstico completo de ejecutables, accesos directos y espacio en disco.
+     - **Limpiar Cache**: Elimina archivos temporales liberando MB/GB en disco.
+     - **Crear / Restaurar Backup**: Genera o restaura respaldos comprimidos `.zip`.
+     - **Revertir**: Elimina perfiles secundarios.
+   - **Consola de Salida Integrada**: Muestra el progreso de cada acción en vivo dentro de la misma ventana.
+3. Si prefieres la consola de texto en terminal, puedes ejecutar el script con el parámetro `-CLI`.
 
 ---
 
@@ -131,10 +129,12 @@ Ambos deben quedar **en la misma carpeta**.
 
 | Parámetro | Por defecto | Descripción |
 |-----------|-------------|-------------|
-| `-Profiles` | `'Cuenta1','Cuenta2','Cuenta3'` | Nombres de los perfiles. Acepta tres o más. Se validan (sin caracteres inválidos ni duplicados). |
+| `-Profiles` | `'Cuenta1','Cuenta2','Cuenta3'` | Nombres de los perfiles. Acepta tres o más. |
+| `-GUI` | — | Abre la Interfaz Gráfica de Usuario nativa en Windows Forms. |
+| `-CLI` | — | Fuerza el modo consola de texto interactivo en terminal. |
 | `-Language` | Auto (`es`/`en`) | Idioma de la interfaz (`es` para español ASCII, `en` para inglés). |
 | `-PortableDir` | `C:\ClaudePortable` | Destino de la copia portable (solo MSIX). |
-| `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. Solo esa clave: no arrastra sesión, credenciales ni preferencias ligadas a tu cuenta. |
+| `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. |
 | `-NoLauncher` | — | Los accesos directos apuntan al `.exe` directamente, sin comprobar versión al abrir. |
 | `-Revert` | — | Deshace todo: accesos directos, carpetas de los perfiles extra, `%APPDATA%\ClaudeMulti` y copia portable. |
 | `-GrantWindowsAppsRead` | — | Autoriza sin preguntar el `takeown`+`icacls` sobre `WindowsApps`. Solo para ejecución desatendida. |

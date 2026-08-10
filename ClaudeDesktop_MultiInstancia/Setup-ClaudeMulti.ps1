@@ -67,7 +67,9 @@ param(
     [switch]  $GrantWindowsAppsRead,
     [switch]  $Revert,
     [switch]  $Force,
-    [string]  $Language    = $null
+    [string]  $Language    = $null,
+    [switch]  $GUI,
+    [switch]  $CLI
 )
 
 $ErrorActionPreference = 'Stop'
@@ -201,14 +203,16 @@ $script:I18n = @{
 function Get-I18nStr {
     param(
         [Parameter(Mandatory)][string]$Key,
-        [object[]]$Args
+        [object[]]$FormatArgs
     )
     $lang = $script:Lang
     if (-not $script:I18n.ContainsKey($lang)) { $lang = 'en' }
     $str = $script:I18n[$lang][$Key]
     if (-not $str) { $str = $script:I18n['en'][$Key] }
-    if ($Args -and $Args.Count -gt 0) { return ($str -f $Args) }
-    return $str
+    if ($FormatArgs -and $FormatArgs.Count -gt 0) {
+        return [string]($str -f $FormatArgs)
+    }
+    return [string]$str
 }
 
 # ---------------------------------------------------------------- helpers ---
@@ -1376,6 +1380,291 @@ function Show-InteractiveMenu {
     }
 }
 
+function Show-InputDialog {
+    param([string]$Prompt, [string]$Title, [string]$DefaultValue = '')
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = $Title
+    $dlg.Size = New-Object System.Drawing.Size(380, 170)
+    $dlg.StartPosition = 'CenterScreen'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false
+    $dlg.MinimizeBox = $false
+
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Location = New-Object System.Drawing.Point(15, 15)
+    $lbl.Size = New-Object System.Drawing.Size(335, 20)
+    $lbl.Text = $Prompt
+    [void]$dlg.Controls.Add($lbl)
+
+    $txt = New-Object System.Windows.Forms.TextBox
+    $txt.Location = New-Object System.Drawing.Point(15, 40)
+    $txt.Size = New-Object System.Drawing.Size(335, 24)
+    $txt.Text = $DefaultValue
+    [void]$dlg.Controls.Add($txt)
+
+    $btnOk = New-Object System.Windows.Forms.Button
+    $btnOk.Location = New-Object System.Drawing.Point(165, 80)
+    $btnOk.Size = New-Object System.Drawing.Size(85, 28)
+    $btnOk.Text = 'OK'
+    $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    [void]$dlg.Controls.Add($btnOk)
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Location = New-Object System.Drawing.Point(260, 80)
+    $btnCancel.Size = New-Object System.Drawing.Size(85, 28)
+    $btnCancel.Text = 'Cancelar'
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    [void]$dlg.Controls.Add($btnCancel)
+
+    $dlg.AcceptButton = $btnOk
+    $dlg.CancelButton = $btnCancel
+
+    $result = $dlg.ShowDialog()
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+        return $txt.Text
+    }
+    return $null
+}
+
+function Show-GuiWindow {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Claude Desktop - Multi Instancia"
+    $form.Size = New-Object System.Drawing.Size(760, 620)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $form.ForeColor = [System.Drawing.Color]::White
+
+    $fontTitle = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $fontBtn   = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $fontNorm  = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+    $fontLog   = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Regular)
+
+    # Titulo
+    $lblTitle = New-Object System.Windows.Forms.Label
+    $lblTitle.Location = New-Object System.Drawing.Point(15, 12)
+    $lblTitle.Size = New-Object System.Drawing.Size(720, 28)
+    $lblTitle.Text = (Get-I18nStr 'HeaderTitle')
+    $lblTitle.Font = $fontTitle
+    $lblTitle.ForeColor = [System.Drawing.Color]::Cyan
+    [void]$form.Controls.Add($lblTitle)
+
+    # Subtitulo
+    $lblSub = New-Object System.Windows.Forms.Label
+    $lblSub.Location = New-Object System.Drawing.Point(15, 42)
+    $lblSub.Size = New-Object System.Drawing.Size(720, 20)
+    $lblSub.Text = (Get-I18nStr 'CurrentInstances') + ":"
+    $lblSub.Font = $fontNorm
+    $lblSub.ForeColor = [System.Drawing.Color]::LightGray
+    [void]$form.Controls.Add($lblSub)
+
+    # Lista de Perfiles
+    $lstProfiles = New-Object System.Windows.Forms.ListBox
+    $lstProfiles.Location = New-Object System.Drawing.Point(15, 65)
+    $lstProfiles.Size = New-Object System.Drawing.Size(320, 140)
+    $lstProfiles.Font = $fontNorm
+    $lstProfiles.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
+    $lstProfiles.ForeColor = [System.Drawing.Color]::White
+    [void]$form.Controls.Add($lstProfiles)
+
+    function Refresh-ProfileList {
+        $lstProfiles.Items.Clear()
+        $profs = Get-ConfiguredProfileObjects
+        if ($profs.Count -eq 0) {
+            foreach ($p in @('Cuenta1', 'Cuenta2', 'Cuenta3')) {
+                [void]$lstProfiles.Items.Add($p)
+            }
+        } else {
+            foreach ($p in $profs) {
+                $noteStr = $(if ($p.note) { " ($($p.note))" } else { '' })
+                [void]$lstProfiles.Items.Add("$($p.name)$noteStr")
+            }
+        }
+    }
+    Refresh-ProfileList
+
+    # CheckBox CopyMCPs
+    $chkCopyMcp = New-Object System.Windows.Forms.CheckBox
+    $chkCopyMcp.Location = New-Object System.Drawing.Point(15, 212)
+    $chkCopyMcp.Size = New-Object System.Drawing.Size(320, 24)
+    $chkCopyMcp.Text = (Get-I18nStr 'CopyMcpsLabel')
+    $chkCopyMcp.Font = $fontNorm
+    $chkCopyMcp.Checked = [bool]$script:CopyMcpConfig
+    [void]$form.Controls.Add($chkCopyMcp)
+
+    # Columna de Botones de Accion
+    [int]$btnX = 350
+    [int]$btnW = 380
+
+    $btnRun = New-Object System.Windows.Forms.Button
+    $btnRun.Location = New-Object System.Drawing.Point($btnX, 65)
+    $btnRun.Size = New-Object System.Drawing.Size($btnW, 32)
+    $btnRun.Text = "Ejecutar / Actualizar Instancias"
+    $btnRun.Font = $fontBtn
+    $btnRun.BackColor = [System.Drawing.Color]::FromArgb(0, 122, 204)
+    $btnRun.ForeColor = [System.Drawing.Color]::White
+    $btnRun.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnRun)
+
+    $btnAdd = New-Object System.Windows.Forms.Button
+    $btnAdd.Location = New-Object System.Drawing.Point($btnX, 102)
+    $btnAdd.Size = New-Object System.Drawing.Size(185, 30)
+    $btnAdd.Text = "+ Anadir Perfil"
+    $btnAdd.Font = $fontNorm
+    $btnAdd.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
+    $btnAdd.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnAdd)
+
+    $btnNote = New-Object System.Windows.Forms.Button
+    $btnNote.Location = New-Object System.Drawing.Point(($btnX + 195), 102)
+    $btnNote.Size = New-Object System.Drawing.Size(185, 30)
+    $btnNote.Text = "Editar Nota/Email"
+    $btnNote.Font = $fontNorm
+    $btnNote.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
+    $btnNote.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnNote)
+
+    $btnHealth = New-Object System.Windows.Forms.Button
+    $btnHealth.Location = New-Object System.Drawing.Point($btnX, 137)
+    $btnHealth.Size = New-Object System.Drawing.Size(185, 30)
+    $btnHealth.Text = "Health Check"
+    $btnHealth.Font = $fontNorm
+    $btnHealth.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
+    $btnHealth.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnHealth)
+
+    $btnCache = New-Object System.Windows.Forms.Button
+    $btnCache.Location = New-Object System.Drawing.Point(($btnX + 195), 137)
+    $btnCache.Size = New-Object System.Drawing.Size(185, 30)
+    $btnCache.Text = "Limpiar Cache"
+    $btnCache.Font = $fontNorm
+    $btnCache.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
+    $btnCache.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnCache)
+
+    $btnBackup = New-Object System.Windows.Forms.Button
+    $btnBackup.Location = New-Object System.Drawing.Point($btnX, 172)
+    $btnBackup.Size = New-Object System.Drawing.Size(185, 30)
+    $btnBackup.Text = "Crear Backup (.zip)"
+    $btnBackup.Font = $fontNorm
+    $btnBackup.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
+    $btnBackup.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnBackup)
+
+    $btnRestore = New-Object System.Windows.Forms.Button
+    $btnRestore.Location = New-Object System.Drawing.Point(($btnX + 195), 172)
+    $btnRestore.Size = New-Object System.Drawing.Size(185, 30)
+    $btnRestore.Text = "Restaurar Backup"
+    $btnRestore.Font = $fontNorm
+    $btnRestore.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
+    $btnRestore.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnRestore)
+
+    $btnRevert = New-Object System.Windows.Forms.Button
+    $btnRevert.Location = New-Object System.Drawing.Point($btnX, 207)
+    $btnRevert.Size = New-Object System.Drawing.Size($btnW, 28)
+    $btnRevert.Text = "Revertir / Eliminar Perfiles Extra"
+    $btnRevert.Font = $fontNorm
+    $btnRevert.BackColor = [System.Drawing.Color]::FromArgb(150, 40, 40)
+    $btnRevert.ForeColor = [System.Drawing.Color]::White
+    $btnRevert.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnRevert)
+
+    # Visor de Logs de Salida
+    $txtLog = New-Object System.Windows.Forms.TextBox
+    $txtLog.Location = New-Object System.Drawing.Point(15, 245)
+    $txtLog.Size = New-Object System.Drawing.Size(715, 320)
+    $txtLog.Multiline = $true
+    $txtLog.ReadOnly = $true
+    $txtLog.ScrollBars = 'Vertical'
+    $txtLog.Font = $fontLog
+    $txtLog.BackColor = [System.Drawing.Color]::FromArgb(12, 12, 12)
+    $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(0, 255, 100)
+    [void]$form.Controls.Add($txtLog)
+
+    function Append-GuiLog {
+        param([string]$Message)
+        $txtLog.AppendText("$Message`r`n")
+        $txtLog.SelectionStart = $txtLog.Text.Length
+        $txtLog.ScrollToCaret()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    # Eventos de los Botones
+    $btnRun.Add_Click({
+        $script:CopyMcpConfig = $chkCopyMcp.Checked
+        $profs = Get-ConfiguredProfiles
+        if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
+        Append-GuiLog "==> Ejecutando instalacion para perfiles: $($profs -join ', ')"
+        $form.Tag = @{ Action = 'Run'; Profiles = $profs }
+        $form.Close()
+    })
+
+    $btnAdd.Add_Click({
+        $newName = Show-InputDialog -Prompt "Ingresa el nombre de la nueva instancia:" -Title "Anadir Perfil" -DefaultValue "Trabajo"
+        if (-not [string]::IsNullOrWhiteSpace($newName)) {
+            $newName = $newName.Trim()
+            $profs = Get-ConfiguredProfiles
+            if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
+            if ($profs -contains $newName) {
+                [System.Windows.Forms.MessageBox]::Show("El perfil '$newName' ya existe.", "Claude Desktop", 'OK', 'Warning')
+            } else {
+                $newList = @($profs) + $newName
+                Append-GuiLog "==> Anadiendo perfil '$newName'. Ejecutando configuracion..."
+                $form.Tag = @{ Action = 'Run'; Profiles = $newList }
+                $form.Close()
+            }
+        }
+    })
+
+    $btnNote.Add_Click({
+        Edit-ProfileNotes
+        Refresh-ProfileList
+    })
+
+    $btnHealth.Add_Click({
+        $txtLog.Clear()
+        Append-GuiLog "Iniciando Diagnostico Health Check..."
+        Invoke-HealthCheck
+        Refresh-ProfileList
+    })
+
+    $btnCache.Add_Click({
+        $txtLog.Clear()
+        Append-GuiLog "Iniciando Limpieza de Cache..."
+        Clear-ProfileCache
+    })
+
+    $btnBackup.Add_Click({
+        Export-ProfileBackup
+    })
+
+    $btnRestore.Add_Click({
+        Import-ProfileBackup
+        Refresh-ProfileList
+    })
+
+    $btnRevert.Add_Click({
+        $res = [System.Windows.Forms.MessageBox]::Show("Seguro que deseas revertir y eliminar los accesos directos y datos de perfiles extra?", "Confirmar Reversion", 'YesNo', 'Warning')
+        if ($res -eq 'Yes') {
+            $profs = Get-ConfiguredProfiles
+            if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
+            $form.Tag = @{ Action = 'Revert'; Profiles = $profs }
+            $form.Close()
+        }
+    })
+
+    [void]$form.ShowDialog()
+    return $form.Tag
+}
+
 # ------------------------------------------------------------------- main ---
 
 Write-Host ''
@@ -1384,7 +1673,13 @@ Write-Host ("  " + (Get-I18nStr 'HeaderTitle')) -ForegroundColor White
 Write-Host '=============================================================' -ForegroundColor White
 
 if (-not $PSBoundParameters.ContainsKey('Profiles') -and -not $Revert) {
-    if ([Environment]::UserInteractive) {
+    if ([Environment]::UserInteractive -and -not $CLI) {
+        $guiRes = Show-GuiWindow
+        if ($guiRes) {
+            if ($guiRes.Profiles) { $Profiles = $guiRes.Profiles }
+            if ($guiRes.Action -eq 'Revert') { $Revert = $true }
+        }
+    } elseif ([Environment]::UserInteractive -and $CLI) {
         $menuRes = Show-InteractiveMenu
         if ($menuRes) {
             if ($menuRes.Profiles) { $Profiles = $menuRes.Profiles }
