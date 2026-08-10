@@ -1,6 +1,6 @@
 # Setup-ClaudeMulti
 
-Script de PowerShell para correr **dos o más instancias de Claude Desktop en paralelo** en el mismo PC, cada una con su propia cuenta, sesión, historial local, MCPs y configuración.
+Script de PowerShell para correr **tres o más instancias de Claude Desktop en paralelo** en el mismo PC, cada una con su propia cuenta, sesión, historial local, MCPs y configuración.
 
 Anthropic no ofrece cambio de cuenta nativo: hay que cerrar sesión y volver a entrar cada vez. Este script elimina ese paso.
 
@@ -12,7 +12,7 @@ Claude Desktop guarda **todo** el estado del usuario —incluido el token de ses
 
 ```
 ANTES    →  Cerrar sesión → login cuenta B → trabajar → cerrar sesión → login cuenta A...
-DESPUÉS  →  Dos ventanas abiertas al mismo tiempo, una por cuenta.
+DESPUÉS  →  Tres ventanas abiertas al mismo tiempo, una por cuenta.
 ```
 
 Claude Desktop es una app Electron, y Electron acepta el parámetro `--user-data-dir`. Lanzando el ejecutable con una ruta distinta, esa ventana usa su propia carpeta y queda completamente aislada de la otra.
@@ -114,7 +114,8 @@ Ambos deben quedar **en la misma carpeta**.
 3. En el Escritorio aparecen:
    - `Claude - Cuenta1 (perfil actual)` → tu sesión de siempre, intacta.
    - `Claude - Cuenta2` → pedirá login. Entra con la segunda cuenta.
-4. Ambas ventanas pueden estar abiertas simultáneamente.
+   - `Claude - Cuenta3` → pedirá login. Entra con la tercera cuenta.
+4. Las tres ventanas pueden estar abiertas simultáneamente.
 
 ---
 
@@ -122,7 +123,7 @@ Ambos deben quedar **en la misma carpeta**.
 
 | Parámetro | Por defecto | Descripción |
 |-----------|-------------|-------------|
-| `-Profiles` | `'Cuenta1','Cuenta2'` | Nombres de los perfiles. Acepta más de dos. Se validan (sin caracteres inválidos ni duplicados). |
+| `-Profiles` | `'Cuenta1','Cuenta2','Cuenta3'` | Nombres de los perfiles. Acepta tres o más. Se validan (sin caracteres inválidos ni duplicados). |
 | `-PortableDir` | `C:\ClaudePortable` | Destino de la copia portable (solo MSIX). |
 | `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. Solo esa clave: no arrastra sesión, credenciales ni preferencias ligadas a tu cuenta. |
 | `-NoLauncher` | — | Los accesos directos apuntan al `.exe` directamente, sin comprobar versión al abrir. |
@@ -168,7 +169,7 @@ Crear un **segundo usuario de Windows** y usar *Ejecutar como otro usuario* (Shi
 ## Revertir
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo' -Revert
+powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo','Cliente' -Revert
 ```
 
 Usa los **mismos** `-Profiles` (y `-PortableDir`, si lo cambiaste) que al instalar. Borra los accesos directos, las carpetas `%APPDATA%\Claude-<Perfil>` de los perfiles extra, `%APPDATA%\ClaudeMulti` (lanzador e iconos) y la copia portable. Pide confirmación antes de borrar datos de perfiles; añade `-Force` para saltarla o `-WhatIf` para solo ver la lista.

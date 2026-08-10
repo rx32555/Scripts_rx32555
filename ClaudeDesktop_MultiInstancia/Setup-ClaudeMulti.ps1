@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Configura Claude Desktop para correr dos (o mas) instancias aisladas en el mismo PC,
+    Configura Claude Desktop para correr tres (o mas) instancias aisladas en el mismo PC,
     cada una con su propia cuenta, sesion, MCPs y configuracion.
 
 .DESCRIPTION
@@ -55,12 +55,12 @@
     .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo','Cliente' -CopyMcpConfig
 
 .EXAMPLE
-    .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo' -Revert
+    .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo','Cliente' -Revert
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
-    [string[]]$Profiles    = @('Cuenta1', 'Cuenta2'),
+    [string[]]$Profiles    = @('Cuenta1', 'Cuenta2', 'Cuenta3'),
     [string]  $PortableDir = 'C:\ClaudePortable',
     [switch]  $CopyMcpConfig,
     [switch]  $NoLauncher,
@@ -1175,8 +1175,8 @@ $created | Format-Table -AutoSize | Out-String | Write-Host
 
 Write-Host 'Como usarlo:' -ForegroundColor White
 Write-Note 'Abre el primer acceso directo -> es tu sesion de siempre.'
-Write-Note 'Abre el segundo -> pedira login. Entra con la otra cuenta.'
-Write-Note 'Ambas ventanas pueden estar abiertas al mismo tiempo.'
+Write-Note 'Abre el segundo y tercer acceso directo -> pediran login. Entra con cada cuenta.'
+Write-Note 'Las tres ventanas pueden estar abiertas al mismo tiempo.'
 Write-Note 'Cada acceso directo lleva una insignia de color con su inicial.'
 if (-not $NoLauncher) {
     Write-Note 'Al abrir un perfil se comprueba si Claude tiene version nueva y,'
