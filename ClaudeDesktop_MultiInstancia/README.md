@@ -110,12 +110,15 @@ Ambos deben quedar **en la misma carpeta**.
 ### Uso
 
 1. Doble clic en `Setup-ClaudeMulti.bat`.
-2. Si el script avisa que necesita Administrador (caso Microsoft Store), ciérralo y ábrelo con botón derecho → **Ejecutar como administrador**.
-3. En el Escritorio aparecen:
-   - `Claude - Cuenta1 (perfil actual)` → tu sesión de siempre, intacta.
-   - `Claude - Cuenta2` → pedirá login. Entra con la segunda cuenta.
-   - `Claude - Cuenta3` → pedirá login. Entra con la tercera cuenta.
-4. Las tres ventanas pueden estar abiertas simultáneamente.
+2. Se desplegará un **menú interactivo** que te permitirá:
+   - Configurar / actualizar las instancias actuales (por defecto: 3 instancias).
+   - Indicar una **cantidad total de instancias** (ej: `4` para crear `Cuenta1` a `Cuenta4`).
+   - **Añadir una nueva instancia** con nombre personalizado (ej: `Trabajo`), sin borrar ni alterar las instancias existentes.
+   - Activar la copia de MCPs a nuevas instancias (`-CopyMcpConfig`).
+   - Revertir / Eliminar perfiles.
+3. Si el script avisa que necesita Administrador (caso Microsoft Store), ciérralo y ábrelo con botón derecho → **Ejecutar como administrador**.
+4. En el Escritorio aparecerán los accesos directos para cada cuenta (ej: `Claude - Cuenta1 (perfil actual)`, `Claude - Cuenta2`, `Claude - Cuenta3`).
+5. Todas las ventanas pueden estar abiertas simultáneamente sin interferir entre sí.
 
 ---
 

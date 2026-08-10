@@ -852,12 +852,118 @@ function Invoke-Revert {
     Write-Ok "Intacto: $(Join-Path $env:APPDATA 'Claude') (tu perfil original)."
 }
 
+function Get-ConfiguredProfiles {
+    $cfgFile = Join-Path $script:HomeDir 'config.json'
+    if (Test-Path -LiteralPath $cfgFile) {
+        try {
+            $cfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+            if ($cfg.profiles) {
+                $names = @($cfg.profiles | ForEach-Object { $_.name })
+                if ($names.Count -gt 0) { return $names }
+            }
+        } catch { }
+    }
+    return @()
+}
+
+function Show-InteractiveMenu {
+    $configured = Get-ConfiguredProfiles
+    $current = $(if ($configured.Count -gt 0) { $configured } else { @('Cuenta1', 'Cuenta2', 'Cuenta3') })
+
+    while ($true) {
+        $currStr = $current -join ', '
+        Write-Host ''
+        Write-Host '=============================================================' -ForegroundColor White
+        Write-Host '  Claude Desktop - Multi Instancia (Menu)' -ForegroundColor White
+        Write-Host '=============================================================' -ForegroundColor White
+        Write-Host "  Instancias configuradas actualmente: [ $currStr ]" -ForegroundColor Cyan
+        Write-Host "  Copiar MCPs (-CopyMcpConfig):        $(if ($script:CopyMcpConfig) { 'SI' } else { 'NO' })" -ForegroundColor Gray
+        Write-Host ''
+        Write-Host "  [1] Ejecutar / Actualizar instalacion actual ($currStr)" -ForegroundColor Yellow
+        Write-Host '  [2] Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
+        Write-Host '  [3] Anadir una nueva instancia / perfil (ej: "Cuenta4" o "Trabajo")'
+        Write-Host '  [4] Alternar copia de MCPs a nuevos perfiles'
+        Write-Host '  [5] Revertir / Eliminar perfiles'
+        Write-Host '  [6] Salir'
+        Write-Host ''
+        $opt = Read-Host 'Selecciona una opcion (1-6)'
+
+        switch ($opt.Trim()) {
+            '1' {
+                return @{ Profiles = $current }
+            }
+            '2' {
+                Write-Host ''
+                $numStr = Read-Host 'Ingresa el numero total de instancias deseado (ej: 4)'
+                [int]$num = 0
+                if ([int]::TryParse($numStr, [ref]$num) -and $num -ge 1) {
+                    $newList = @()
+                    for ($i = 1; $i -le $num; $i++) {
+                        if ($i -le $current.Count -and $current[$i-1]) {
+                            $newList += $current[$i-1]
+                        } else {
+                            $newList += "Cuenta$i"
+                        }
+                    }
+                    return @{ Profiles = $newList }
+                } else {
+                    Write-Warn 'Numero no valido.'
+                }
+            }
+            '3' {
+                Write-Host ''
+                $newName = Read-Host 'Ingresa el nombre del nuevo perfil o instancia (ej: Cuenta4 o Trabajo)'
+                if ($newName) { $newName = $newName.Trim() }
+                if (-not [string]::IsNullOrWhiteSpace($newName)) {
+                    if ($current -contains $newName) {
+                        Write-Warn "El perfil '$newName' ya existe."
+                    } else {
+                        $newList = @($current) + $newName
+                        return @{ Profiles = $newList }
+                    }
+                } else {
+                    Write-Warn 'El nombre no puede estar vacio.'
+                }
+            }
+            '4' {
+                $script:CopyMcpConfig = -not $script:CopyMcpConfig
+                Write-Ok "Copia de MCPs: $(if ($script:CopyMcpConfig) { 'ACTIVADA' } else { 'DESACTIVADA' })"
+            }
+            '5' {
+                Write-Host ''
+                Write-Warn 'Se eliminaran accesos directos y datos de perfiles extra.'
+                $ans = Read-Host 'Confirmas revertir la configuracion? (S/N)'
+                if ($ans -eq 'S' -or $ans -eq 's') {
+                    return @{ Profiles = $current; Revert = $true }
+                }
+            }
+            '6' {
+                Write-Host 'Operacion cancelada.'
+                exit 0
+            }
+            default {
+                Write-Warn 'Opcion invalida.'
+            }
+        }
+    }
+}
+
 # ------------------------------------------------------------------- main ---
 
 Write-Host ''
 Write-Host '=============================================================' -ForegroundColor White
 Write-Host '  Claude Desktop - configuracion de multiples instancias' -ForegroundColor White
 Write-Host '=============================================================' -ForegroundColor White
+
+if (-not $PSBoundParameters.ContainsKey('Profiles') -and -not $Revert) {
+    if ([Environment]::UserInteractive) {
+        $menuRes = Show-InteractiveMenu
+        if ($menuRes) {
+            if ($menuRes.Profiles) { $Profiles = $menuRes.Profiles }
+            if ($menuRes.Revert)   { $Revert = $true }
+        }
+    }
+}
 
 # Al invocar via .bat, cmd entrega "-Profiles A,B" como UN solo token y
 # powershell -File no lo parte en array. Se normaliza aqui para que
