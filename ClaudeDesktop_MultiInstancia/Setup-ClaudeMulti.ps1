@@ -138,7 +138,7 @@ $script:I18n = @{
         AllWindowsOpen       = 'Las ventanas pueden estar abiertas al mismo tiempo.'
         BadgeNote            = 'Cada acceso directo lleva una insignia de color con su inicial.'
         UpdateCheckNote      = 'Al abrir un perfil se comprueba si Claude tiene version nueva y la actualiza.'
-        ImportantTitle       = 'ImportantTitle'
+        ImportantTitle       = 'Importante:'
         CoworkNote           = 'Cowork corre en una VM Hyper-V unica por maquina: solo una instancia puede usar Cowork a la vez.'
         NoMcpNote            = 'Los perfiles nuevos arrancan SIN MCP servers. Usa -CopyMcpConfig para copiar los del perfil por defecto.'
         StoreNote            = 'El primer perfil se lanza por el paquete de la Store: se actualiza solo.'
@@ -217,11 +217,13 @@ function Get-I18nStr {
 
 # ---------------------------------------------------------------- helpers ---
 
-function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan }
-function Write-Ok   { param([string]$m) Write-Host "    [ok]   $m" -ForegroundColor Green }
-function Write-Note { param([string]$m) Write-Host "    ->     $m" -ForegroundColor Gray }
-function Write-Warn { param([string]$m) Write-Host "    [!]    $m" -ForegroundColor Yellow }
-function Write-Err  { param([string]$m) Write-Host "    [X]    $m" -ForegroundColor Red }
+$script:GuiLogger = $null
+
+function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan; if ($script:GuiLogger) { & $script:GuiLogger "`r`n==> $m" } }
+function Write-Ok   { param([string]$m) Write-Host "    [ok]   $m" -ForegroundColor Green; if ($script:GuiLogger) { & $script:GuiLogger "    [ok]   $m" } }
+function Write-Note { param([string]$m) Write-Host "    ->     $m" -ForegroundColor Gray; if ($script:GuiLogger) { & $script:GuiLogger "    ->     $m" } }
+function Write-Warn { param([string]$m) Write-Host "    [!]    $m" -ForegroundColor Yellow; if ($script:GuiLogger) { & $script:GuiLogger "    [!]    $m" } }
+function Write-Err  { param([string]$m) Write-Host "    [X]    $m" -ForegroundColor Red; if ($script:GuiLogger) { & $script:GuiLogger "    [X]    $m" } }
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -903,8 +905,36 @@ function Write-LauncherConfig {
 
 function Get-ProfileLabel {
     param([string]$Name, [int]$Index)
-    if ($Index -eq 0) { return (Get-I18nStr 'ProfileLabelOriginal' @($Name)) }
-    return (Get-I18nStr 'ProfileLabelExtra' @($Name))
+    $note = Get-ProfileNote -Name $Name
+    if ($Index -eq 0) {
+        if ($note) { return "Claude - $Name ($note) (perfil actual)" }
+        return "Claude - $Name (perfil actual)"
+    }
+    if ($note) { return "Claude - $Name ($note)" }
+    return "Claude - $Name"
+}
+
+# Accesos directos que pertenecen a un perfil.
+#
+# NO se puede filtrar con el comodin "Claude - $n*.lnk": tambien engancha a los
+# hermanos con prefijo comun (Cuenta1 se llevaria a Cuenta10; Trabajo, a
+# Trabajo2). Pero tampoco basta comparar contra etiquetas fijas, porque la nota
+# pudo cambiar y hay que reconocer el acceso viejo para reemplazarlo.
+#
+# Se listan todos los "Claude - *.lnk", se descompone el nombre en perfil+nota
+# y se compara el PERFIL de forma exacta.
+$script:ShortcutRegex = '^Claude - (?<name>.+?)(?: \((?<note>[^)]*)\))?(?: \(perfil actual\))?$'
+
+function Get-ProfileShortcutPaths {
+    param([Parameter(Mandatory)][string]$Name)
+
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    Get-ChildItem -LiteralPath $desktop -Filter 'Claude - *.lnk' -ErrorAction SilentlyContinue |
+        Where-Object {
+            $m = [regex]::Match($_.BaseName, $script:ShortcutRegex)
+            $m.Success -and $m.Groups['name'].Value -eq $Name
+        } |
+        ForEach-Object { $_.FullName }
 }
 
 function Invoke-Revert {
@@ -915,16 +945,13 @@ function Invoke-Revert {
         [switch]$SkipConfirm
     )
 
-    $desktop = [Environment]::GetFolderPath('Desktop')
-
     Write-Step 'Borrando accesos directos...'
     foreach ($n in $Names) {
-        foreach ($label in @("Claude - $n (perfil actual)", "Claude - $n")) {
-            $lnk = Join-Path $desktop "$label.lnk"
+        foreach ($lnk in (Get-ProfileShortcutPaths -Name $n)) {
             if (Test-Path -LiteralPath $lnk) {
                 if ($PSCmdlet.ShouldProcess($lnk, 'Eliminar acceso directo')) {
                     Remove-Item -LiteralPath $lnk -Force
-                    Write-Ok "Borrado: $label.lnk"
+                    Write-Ok "Borrado: $(Split-Path -Leaf $lnk)"
                 }
             }
         }
@@ -1028,6 +1055,17 @@ function Get-ProfileNote {
     $profs = Get-ConfiguredProfileObjects
     $found = $profs | Where-Object { $_.name -eq $Name } | Select-Object -First 1
     if ($found -and $found.note) { return $found.note }
+
+    # Respaldo: leer la nota del nombre del acceso directo. Cubre el caso de un
+    # config.json regenerado sin notas (por ejemplo una ejecucion con menos
+    # -Profiles), para no perder los correos al reconstruir los accesos.
+    foreach ($lnk in (Get-ProfileShortcutPaths -Name $Name)) {
+        $m = [regex]::Match([IO.Path]::GetFileNameWithoutExtension($lnk), $script:ShortcutRegex)
+        if ($m.Success -and $m.Groups['note'].Success) {
+            $note = $m.Groups['note'].Value
+            if ($note -and $note -ne 'perfil actual') { return $note }
+        }
+    }
     return $null
 }
 
@@ -1125,7 +1163,23 @@ function Invoke-HealthCheck {
         Write-Note 'No hay perfiles configurados actualmente.'
     }
 
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' }
+    # config.json es la unica lista de perfiles, pero una ejecucion con menos
+    # -Profiles la reescribe y deja carpetas de datos sin dueno: no aparecen en
+    # la GUI ni en el menu, y -Revert no las limpia.
+    $known   = @($profs | ForEach-Object { "Claude-$($_.name)" })
+    $orphans = @(Get-ChildItem -LiteralPath $env:APPDATA -Filter 'Claude-*' -Directory -ErrorAction SilentlyContinue |
+                 Where-Object { $known -notcontains $_.Name })
+    if ($orphans.Count -gt 0) {
+        Write-Host "`nPerfiles huerfanos (existen en disco pero no en config.json):" -ForegroundColor Yellow
+        foreach ($o in $orphans) {
+            $n = $o.Name -replace '^Claude-', ''
+            Write-Warn "$n -> $($o.FullName)"
+        }
+        Write-Note 'Vuelve a ejecutar la configuracion incluyendolos en -Profiles'
+        Write-Note 'para readoptarlos, o borra la carpeta a mano si ya no los usas.'
+    }
+
+    $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' })
     Write-Host "`nProcesos de Claude en ejecucion: $($procs.Count)" -ForegroundColor Gray
     Write-Host ''
 }
@@ -1175,12 +1229,29 @@ function Clear-ProfileCache {
 }
 
 function Export-ProfileBackup {
+    param([string]$DestinationZip)
+
     Write-Host ''
     Write-Host '--- Respaldar Perfiles (Backup .zip) ---' -ForegroundColor Cyan
 
-    $desktop = [Environment]::GetFolderPath('Desktop')
     $timestamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
-    $zipPath = Join-Path $desktop "ClaudeMulti_Backup_$timestamp.zip"
+    if ([string]::IsNullOrWhiteSpace($DestinationZip)) {
+        $DestinationZip = Join-Path ([Environment]::GetFolderPath('Desktop')) "ClaudeMulti_Backup_$timestamp.zip"
+    }
+    $DestinationZip = $DestinationZip.Trim('"').Trim("'")
+
+    # Con Claude abierto, Cookies y Local Storage estan bloqueados y la copia
+    # saldria incompleta justo en lo que importa (la sesion).
+    $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' })
+    if ($procs.Count -gt 0) {
+        Write-Warn "Hay $($procs.Count) proceso(s) de Claude en ejecucion."
+        Write-Warn 'Cierra todas las ventanas de Claude antes de respaldar:'
+        Write-Warn 'con la app abierta, la sesion queda bloqueada y no se copia.'
+        return
+    }
+
+    Write-Warn 'El backup incluye los tokens de sesion de todas las cuentas.'
+    Write-Warn 'Guarda el .zip en un sitio seguro: equivale a tus credenciales.'
 
     $tempDir = Join-Path $env:TEMP "ClaudeMulti_Backup_$timestamp"
     if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
@@ -1194,25 +1265,35 @@ function Export-ProfileBackup {
         $profDir = Join-Path $tempDir 'Profiles'
         New-Item -ItemType Directory -Path $profDir -Force | Out-Null
 
-        $targets = @()
-        $mainDir = Join-Path $env:APPDATA 'Claude'
-        if (Test-Path -LiteralPath $mainDir) { Copy-Item -LiteralPath $mainDir -Destination (Join-Path $profDir 'Claude') -Recurse -Force }
-        Get-ChildItem -LiteralPath $env:APPDATA -Filter 'Claude-*' -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $profDir $_.Name) -Recurse -Force
+        # robocopy en vez de Copy-Item: excluye la cache de entrada (en vez de
+        # copiarla para borrarla despues) y no aborta si un archivo esta en uso.
+        $skipped  = 0
+        $sources  = @()
+        $mainDir  = Join-Path $env:APPDATA 'Claude'
+        if (Test-Path -LiteralPath $mainDir) { $sources += (Get-Item -LiteralPath $mainDir) }
+        $sources += @(Get-ChildItem -LiteralPath $env:APPDATA -Filter 'Claude-*' -Directory -ErrorAction SilentlyContinue)
+
+        foreach ($src in $sources) {
+            $dst = Join-Path $profDir $src.Name
+            $null = robocopy $src.FullName $dst /E /XJ /R:0 /W:0 `
+                        /XD 'Cache' 'Code Cache' 'GPUCache' 'DawnCache' 'blob_storage' 'Crashpad' 'logs' `
+                        /NFL /NDL /NJH /NJS /NP
+            $rc = $LASTEXITCODE
+            $global:LASTEXITCODE = 0
+            if ($rc -ge 16) { throw "robocopy fallo copiando $($src.Name) (codigo $rc)." }
+            if ($rc -ge 8)  { $skipped++ ; Write-Warn "Algunos archivos de '$($src.Name)' estaban en uso y se omitieron." }
+            Write-Note "Incluido: $($src.Name)"
         }
 
-        # Excluir cache pesada dentro de la copia de backup
-        $cacheSubdirs = @('Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'blob_storage', 'Crashpad', 'logs')
-        Get-ChildItem -LiteralPath $profDir -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $cacheSubdirs -contains $_.Name } | ForEach-Object {
-            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $DestinationZip) { Remove-Item -LiteralPath $DestinationZip -Force }
+        Compress-Archive -Path (Join-Path $tempDir '*') -DestinationPath $DestinationZip -Force
+        $zipMB = [math]::Round(((Get-Item -LiteralPath $DestinationZip).Length / 1MB), 2)
+
+        Write-Ok 'Backup creado exitosamente:'
+        Write-Note "$DestinationZip ($zipMB MB)"
+        if ($skipped -gt 0) {
+            Write-Warn "$skipped perfil(es) quedaron incompletos por archivos en uso."
         }
-
-        Compress-Archive -Path "$tempDir\*" -DestinationPath $zipPath -Force
-        $zipBytes = (Get-Item -LiteralPath $zipPath).Length
-        $zipMB = [math]::Round(($zipBytes / 1MB), 2)
-
-        Write-Ok "Backup creado exitosamente en el Escritorio:"
-        Write-Note "$zipPath ($zipMB MB)"
     }
     catch {
         Write-Err "Error al crear el backup: $($_.Exception.Message)"
@@ -1224,42 +1305,59 @@ function Export-ProfileBackup {
 }
 
 function Import-ProfileBackup {
-    Write-Host ''
-    Write-Host '--- Restaurar Perfiles desde Backup (.zip) ---' -ForegroundColor Cyan
+    param([string]$SourceZip)
+    if ([string]::IsNullOrWhiteSpace($SourceZip) -and -not $script:GuiLogger) {
+        $SourceZip = Read-Host 'Ingresa la ruta completa del archivo .zip de backup'
+    }
+    if ([string]::IsNullOrWhiteSpace($SourceZip)) { return }
+    $SourceZip = $SourceZip.Trim('"').Trim("'")
 
-    $zipPath = Read-Host 'Ingresa la ruta completa del archivo .zip de backup'
-    if ([string]::IsNullOrWhiteSpace($zipPath)) { return }
-    $zipPath = $zipPath.Trim('"').Trim("'")
+    if (-not (Test-Path -LiteralPath $SourceZip)) {
+        Write-Warn "No se encontro el archivo: $SourceZip"
+        return
+    }
 
-    if (-not (Test-Path -LiteralPath $zipPath)) {
-        Write-Warn "No se encontro el archivo: $zipPath"
+    # Restaurar sobre un perfil abierto deja la sesion en estado inconsistente.
+    $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' })
+    if ($procs.Count -gt 0) {
+        Write-Warn "Hay $($procs.Count) proceso(s) de Claude en ejecucion."
+        Write-Warn 'Cierra todas las ventanas de Claude antes de restaurar.'
         return
     }
 
     $tempDir = Join-Path $env:TEMP "ClaudeMulti_Restore_$(Get-Random)"
-    if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
+    if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
     try {
-        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+        Expand-Archive -Path $SourceZip -DestinationPath $tempDir -Force
 
+        # OJO: Copy-Item -Recurse sobre un destino que YA existe crea una
+        # subcarpeta (destino\origen\...) en vez de fusionar. Hay que copiar
+        # el CONTENIDO (ruta\*), no la carpeta.
         $homeBackup = Join-Path $tempDir 'ClaudeMulti'
         if (Test-Path -LiteralPath $homeBackup) {
-            Copy-Item -LiteralPath $homeBackup -Destination $script:HomeDir -Recurse -Force
-            Write-Ok "Configuracion de lanzador restaurada."
+            if (-not (Test-Path -LiteralPath $script:HomeDir)) {
+                New-Item -ItemType Directory -Path $script:HomeDir -Force | Out-Null
+            }
+            Copy-Item -Path (Join-Path $homeBackup '*') -Destination $script:HomeDir -Recurse -Force
+            Write-Ok 'Configuracion de lanzador restaurada.'
         }
 
         $profBackup = Join-Path $tempDir 'Profiles'
         if (Test-Path -LiteralPath $profBackup) {
             Get-ChildItem -LiteralPath $profBackup -Directory | ForEach-Object {
                 $targetAppData = Join-Path $env:APPDATA $_.Name
-                Copy-Item -LiteralPath $_.FullName -Destination $targetAppData -Recurse -Force
+                if (-not (Test-Path -LiteralPath $targetAppData)) {
+                    New-Item -ItemType Directory -Path $targetAppData -Force | Out-Null
+                }
+                Copy-Item -Path (Join-Path $_.FullName '*') -Destination $targetAppData -Recurse -Force
                 Write-Ok "Restaurado perfil: $($_.Name)"
             }
         }
 
         Write-Ok 'Restauracion completada exitosamente.'
-        Write-Note 'Se recomienda ejecutar la opcion [1] del menu para reconstruir accesos directos.'
+        Write-Note 'Se recomienda ejecutar la configuracion para actualizar los accesos directos.'
     }
     catch {
         Write-Err "Error al restaurar el backup: $($_.Exception.Message)"
@@ -1359,7 +1457,7 @@ function Show-InteractiveMenu {
             }
             '9' {
                 $script:CopyMcpConfig = -not $script:CopyMcpConfig
-                Write-Ok (if ($script:CopyMcpConfig) { Get-I18nStr 'CopyMcpsActive' } else { Get-I18nStr 'CopyMcpsInactive' })
+                Write-Ok $(if ($script:CopyMcpConfig) { Get-I18nStr 'CopyMcpsActive' } else { Get-I18nStr 'CopyMcpsInactive' })
             }
             '10' {
                 Write-Host ''
@@ -1429,6 +1527,320 @@ function Show-InputDialog {
     return $null
 }
 
+function Invoke-MultiSetup {
+    param(
+        [string[]]$TargetProfiles,
+        [string]$TargetPortableDir = $PortableDir,
+        [switch]$CopyMcp,
+        [switch]$NoLaunch,
+        [switch]$GrantRead,
+        [switch]$ForceRecopy
+    )
+    Assert-ProfileNames -Names $TargetProfiles
+
+    Write-Step 'Buscando la instalacion de Claude Desktop...'
+    $install = Get-ClaudeInstall
+
+    if (-not $install) {
+        Write-Err 'No se encontro Claude Desktop en este equipo.'
+        Write-Note 'Rutas revisadas: %LOCALAPPDATA%\AnthropicClaude, %ProgramFiles%\Claude y paquetes MSIX.'
+        Write-Note 'Instala Claude Desktop y vuelve a ejecutar este script.'
+        return $false
+    }
+
+    Write-Ok "Modo de instalacion: $($install.Mode)"
+    Write-Note "Carpeta: $($install.Dir)"
+    if ($install.Version) { Write-Note "Version instalada: $($install.Version)" }
+
+    $targetExe   = $install.Exe
+    $portableNew = $false
+
+    if ($install.Mode -eq 'Msix') {
+        Write-Step 'Instalacion tipo MSIX detectada (Microsoft Store).'
+        Write-Note 'Windows no permite lanzar el .exe desde WindowsApps con parametros,'
+        Write-Note 'asi que hay que hacer una copia portable en una carpeta normal.'
+
+        $stamp      = Get-PortableStamp -PortablePath $TargetPortableDir
+        $needsCopy  = $true
+        $copyReason = 'No hay copia portable todavia.'
+
+        if ($ForceRecopy) {
+            $copyReason = 'Se pidio -Force: se rehace la copia.'
+        }
+        elseif ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
+            if ($stamp.version -eq $install.Version) {
+                $needsCopy  = $false
+                $targetExe  = $stamp.exe
+                Write-Ok "Copia portable al dia (version $($stamp.version)). No hay nada que actualizar."
+            }
+            else {
+                $copyReason = "Claude se actualizo: $($stamp.version) -> $($install.Version). Actualizando la copia..."
+            }
+        }
+        elseif ($stamp) {
+            $copyReason = 'La copia portable esta incompleta o movida: se rehace.'
+        }
+        elseif (Test-Path -LiteralPath $TargetPortableDir) {
+            $copyReason = 'Hay una copia portable sin sello de version: se rehace para poder controlarla.'
+        }
+
+        if ($needsCopy) {
+            Write-Note $copyReason
+
+            $running = @(Get-PortableProcess -PortablePath $TargetPortableDir)
+            if ($running.Count -gt 0) {
+                Write-Warn "Hay $($running.Count) proceso(s) de Claude corriendo desde $TargetPortableDir."
+                Write-Warn 'No se puede reemplazar la copia mientras esten abiertos.'
+                Write-Note 'Cierra esas ventanas de Claude y vuelve a intentar.'
+                Write-Note 'Por ahora se sigue usando la copia actual.'
+                $needsCopy = $false
+                if ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
+                    $targetExe = $stamp.exe
+                }
+                else {
+                    $found = Get-ChildItem -LiteralPath $TargetPortableDir -Filter 'claude.exe' -Recurse `
+                               -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if (-not $found) { throw "No se encontro claude.exe dentro de $TargetPortableDir" }
+                    $targetExe = $found.FullName
+                }
+            }
+        }
+
+        $copied = -not $needsCopy
+        if ($needsCopy) {
+            $portableNew = $true
+            try {
+                Copy-ToPortable -Source $install.Dir -Destination $TargetPortableDir -Overwrite
+                $copied = $true
+            }
+            catch {
+                Write-Warn $_.Exception.Message
+            }
+        }
+
+        if (-not $copied) {
+            if (@(Get-PortableProcess -PortablePath $TargetPortableDir).Count -gt 0) {
+                Write-Host ''
+                Write-Err 'La actualizacion fallo: hay Claude abierto desde la copia portable.'
+                Write-Note 'Cierra todas las ventanas de Claude y vuelve a intentar.'
+                return $false
+            }
+
+            Write-Host ''
+            Write-Warn 'La copia fallo por los permisos restrictivos de WindowsApps.'
+            Write-Warn 'La solucion es dar permiso de lectura al grupo Administradores'
+            Write-Warn 'sobre esa carpeta.'
+
+            $allowed = [bool]$GrantRead
+            if (-not $allowed) {
+                try {
+                    $allowed = $PSCmdlet.ShouldContinue(
+                        "Dar lectura al grupo Administradores sobre $($install.Dir)?",
+                        'Permisos de WindowsApps')
+                }
+                catch {
+                    if ($script:GuiLogger) {
+                        $res = [System.Windows.Forms.MessageBox]::Show("Dar permisos de lectura al grupo Administradores sobre $($install.Dir)?", "Permisos WindowsApps", 'YesNo', 'Question')
+                        $allowed = ($res -eq 'Yes')
+                    } else {
+                        Write-Err 'Ejecucion no interactiva: usa -GrantWindowsAppsRead para autorizarlo.'
+                        $allowed = $false
+                    }
+                }
+            }
+
+            if (-not $allowed) {
+                Write-Note 'Cancelado.'
+                return $false
+            }
+
+            if (-not (Test-Admin)) {
+                Write-Err 'Este paso necesita permisos de Administrador.'
+                Write-Note 'Cierra esta ventana y ejecuta con "Ejecutar como administrador".'
+                return $false
+            }
+
+            if ($PSCmdlet.ShouldProcess($install.Dir, 'takeown + icacls (lectura para Administradores)')) {
+                Write-Note 'Tomando posesion de la carpeta del paquete...'
+                & takeown.exe /F "$($install.Dir)" /R /D S | Out-Null
+                Write-Note 'Otorgando lectura a Administradores...'
+                & icacls.exe "$($install.Dir)" /grant '*S-1-5-32-544:(OI)(CI)(RX)' /T /C /Q | Out-Null
+
+                Copy-ToPortable -Source $install.Dir -Destination $TargetPortableDir -Overwrite
+            }
+        }
+
+        if ($portableNew) {
+            $portableExe = $null
+            if ($install.Exe) {
+                $baseDir = $install.Dir.TrimEnd('\')
+                if ($install.Exe.StartsWith($baseDir, [StringComparison]::OrdinalIgnoreCase)) {
+                    $rel         = $install.Exe.Substring($baseDir.Length).TrimStart('\')
+                    $portableExe = Join-Path $TargetPortableDir $rel
+                }
+            }
+            if (-not $portableExe -or -not (Test-Path -LiteralPath $portableExe)) {
+                $found = Get-ChildItem -LiteralPath $TargetPortableDir -Filter 'claude.exe' -Recurse `
+                           -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($found) {
+                    $portableExe = $found.FullName
+                }
+                elseif (-not $WhatIfPreference) {
+                    throw "No se encontro claude.exe dentro de $TargetPortableDir"
+                }
+                elseif (-not $portableExe) {
+                    $portableExe = Join-Path $TargetPortableDir 'claude.exe'
+                }
+            }
+            $targetExe = $portableExe
+
+            if (-not $WhatIfPreference) {
+                Set-PortableStamp -PortablePath $TargetPortableDir -Version $install.Version `
+                                  -Exe $targetExe -Source $install.Dir
+            }
+            Write-Ok "Copia portable lista (version $($install.Version)): $targetExe"
+        }
+    }
+    else {
+        Write-Ok 'No hace falta copia portable: el ejecutable se puede lanzar directo.'
+        if ($install.Exe -match '\\app-[0-9]') {
+            Write-Warn 'El ejecutable esta dentro de una carpeta con numero de version.'
+        }
+    }
+
+    if (-not $targetExe -or (-not (Test-Path -LiteralPath $targetExe) -and -not $WhatIfPreference)) {
+        throw 'No se pudo determinar el ejecutable de Claude Desktop.'
+    }
+
+    $iconDir = Join-Path $script:HomeDir 'icons'
+    Write-Step 'Generando iconos de color por perfil...'
+    $icons = @{}
+    for ($i = 0; $i -lt $TargetProfiles.Count; $i++) {
+        $n = $TargetProfiles[$i]
+        try {
+            $ic = New-ProfileIcon -Name $n -Index $i -SourceExe $targetExe -OutDir $iconDir
+            $icons[$n] = $ic
+            Write-Ok "$n -> $($ic.Color)"
+        }
+        catch {
+            Write-Warn "No se pudo generar el icono de '$n': $($_.Exception.Message)"
+            $icons[$n] = $null
+        }
+    }
+
+    if (-not $NoLaunch) {
+        Write-Step 'Instalando lanzador (comprueba actualizaciones antes de abrir)...'
+        Install-Launcher -HomePath $script:HomeDir
+        Write-Ok $script:HomeDir
+    }
+
+    Write-Step 'Creando accesos directos en el Escritorio...'
+    $wscript  = Join-Path $env:WINDIR 'System32\wscript.exe'
+    $vbs      = Join-Path $script:HomeDir 'launch.vbs'
+    $created  = @()
+    $cfgProfs = @()
+
+    for ($i = 0; $i -lt $TargetProfiles.Count; $i++) {
+        $name     = $TargetProfiles[$i]
+        $label    = Get-ProfileLabel -Name $name -Index $i
+        $iconPath = $(if ($icons[$name]) { $icons[$name].Path } else { $targetExe })
+        $color    = $(if ($icons[$name]) { $icons[$name].Color } else { '-' })
+        $useStore = ($i -eq 0 -and $install.Mode -eq 'Msix' -and $install.Aumid)
+        $note     = Get-ProfileNote -Name $name
+        $noteStr  = $(if ($note) { " ($note)" } else { '' })
+
+        # Borrar accesos directos anteriores de esta misma cuenta si cambio su
+        # nota o etiqueta. Se comparan rutas exactas, no un comodin por prefijo.
+        foreach ($old in (Get-ProfileShortcutPaths -Name $name)) {
+            if ((Test-Path -LiteralPath $old) -and ((Split-Path -Leaf $old) -ne "$label.lnk")) {
+                if ($WhatIfPreference) {
+                    Write-Note "Whatif: se borraria el acceso anterior: $(Split-Path -Leaf $old)"
+                }
+                else {
+                    Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+                    Write-Note "Removido acceso directo anterior: $(Split-Path -Leaf $old)"
+                }
+            }
+        }
+
+        if ($i -eq 0) {
+            $dataDir = Join-Path $env:APPDATA 'Claude'
+        }
+        else {
+            $dataDir = Join-Path $env:APPDATA "Claude-$name"
+            if (-not (Test-Path -LiteralPath $dataDir)) {
+                New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+            }
+            if ($CopyMcp) {
+                Copy-McpConfig -DestinationDir $dataDir -Overwrite:$ForceRecopy
+            }
+        }
+
+        if ($useStore) {
+            $lnk = New-ClaudeShortcut -Name $label `
+                     -Target      (Join-Path $env:WINDIR 'explorer.exe') `
+                     -Arguments   "shell:AppsFolder\$($install.Aumid)" `
+                     -IconPath    $iconPath `
+                     -Description "Claude Desktop - perfil '$name'$noteStr (paquete de la Store)"
+            $via = 'Store'
+        }
+        elseif ($NoLaunch) {
+            $arg = $(if ($i -eq 0) { '' } else { "--user-data-dir=`"$dataDir`"" })
+            $lnk = New-ClaudeShortcut -Name $label -Target $targetExe -Arguments $arg `
+                     -IconPath $iconPath -Description "Claude Desktop - perfil '$name'$noteStr en $dataDir"
+            $via = 'Exe'
+        }
+        else {
+            $lnk = New-ClaudeShortcut -Name $label `
+                     -Target      $wscript `
+                     -Arguments   "`"$vbs`" `"$name`"" `
+                     -IconPath    $iconPath `
+                     -Description "Claude Desktop - perfil '$name'$noteStr (comprueba actualizaciones al abrir)"
+            $via = 'Lanzador'
+        }
+
+        $cfgProfs += [pscustomobject]@{
+            name     = $name
+            note     = $note
+            dataDir  = $dataDir
+            useStore = [bool]$useStore
+            exe      = $targetExe
+            icon     = $iconPath
+        }
+        $created += [pscustomobject]@{
+            Perfil = $name
+            Color  = $color
+            Lanza  = $via
+            Acceso = Split-Path -Leaf $lnk
+        }
+        Write-Ok "$label  [$color]"
+    }
+
+    # config.json se escribe SIEMPRE: ya no es solo del lanzador, es la lista
+    # de perfiles y sus notas que leen el menu, la GUI y Get-ProfileShortcutPaths.
+    if (-not (Test-Path -LiteralPath $script:HomeDir)) {
+        New-Item -ItemType Directory -Path $script:HomeDir -Force | Out-Null
+    }
+    Write-LauncherConfig -HomePath $script:HomeDir -Config ([pscustomobject]@{
+        mode        = $install.Mode
+        aumid       = $install.Aumid
+        portableDir = $TargetPortableDir
+        sourceExe   = $install.Exe
+        version     = $install.Version
+        profiles    = $cfgProfs
+    })
+
+    Write-Host ''
+    Write-Host '=============================================================' -ForegroundColor White
+    Write-Host "  $(Get-I18nStr 'ReadyTitle')" -ForegroundColor Green
+    Write-Host '=============================================================' -ForegroundColor White
+    $tableStr = $created | Format-Table -AutoSize | Out-String
+    Write-Host $tableStr
+    if ($script:GuiLogger) { & $script:GuiLogger $tableStr }
+
+    return $true
+}
+
 function Show-GuiWindow {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
@@ -1447,7 +1859,6 @@ function Show-GuiWindow {
     $fontNorm  = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
     $fontLog   = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Regular)
 
-    # Titulo
     $lblTitle = New-Object System.Windows.Forms.Label
     $lblTitle.Location = New-Object System.Drawing.Point(15, 12)
     $lblTitle.Size = New-Object System.Drawing.Size(720, 28)
@@ -1456,7 +1867,6 @@ function Show-GuiWindow {
     $lblTitle.ForeColor = [System.Drawing.Color]::Cyan
     [void]$form.Controls.Add($lblTitle)
 
-    # Subtitulo
     $lblSub = New-Object System.Windows.Forms.Label
     $lblSub.Location = New-Object System.Drawing.Point(15, 42)
     $lblSub.Size = New-Object System.Drawing.Size(720, 20)
@@ -1465,7 +1875,6 @@ function Show-GuiWindow {
     $lblSub.ForeColor = [System.Drawing.Color]::LightGray
     [void]$form.Controls.Add($lblSub)
 
-    # Lista de Perfiles
     $lstProfiles = New-Object System.Windows.Forms.ListBox
     $lstProfiles.Location = New-Object System.Drawing.Point(15, 65)
     $lstProfiles.Size = New-Object System.Drawing.Size(320, 140)
@@ -1490,7 +1899,6 @@ function Show-GuiWindow {
     }
     Refresh-ProfileList
 
-    # CheckBox CopyMCPs
     $chkCopyMcp = New-Object System.Windows.Forms.CheckBox
     $chkCopyMcp.Location = New-Object System.Drawing.Point(15, 212)
     $chkCopyMcp.Size = New-Object System.Drawing.Size(320, 24)
@@ -1499,7 +1907,6 @@ function Show-GuiWindow {
     $chkCopyMcp.Checked = [bool]$script:CopyMcpConfig
     [void]$form.Controls.Add($chkCopyMcp)
 
-    # Columna de Botones de Accion
     [int]$btnX = 350
     [int]$btnW = 380
 
@@ -1577,7 +1984,6 @@ function Show-GuiWindow {
     $btnRevert.FlatStyle = 'Flat'
     [void]$form.Controls.Add($btnRevert)
 
-    # Visor de Logs de Salida
     $txtLog = New-Object System.Windows.Forms.TextBox
     $txtLog.Location = New-Object System.Drawing.Point(15, 245)
     $txtLog.Size = New-Object System.Drawing.Size(715, 320)
@@ -1597,14 +2003,34 @@ function Show-GuiWindow {
         [System.Windows.Forms.Application]::DoEvents()
     }
 
-    # Eventos de los Botones
+    $script:GuiLogger = { param($msg) Append-GuiLog $msg }
+
+    # La copia portable corre en el hilo de UI y puede tardar minutos. No se
+    # puede evitar el bloqueo sin runspaces, pero al menos se ve que trabaja
+    # y no se aceptan clics que reentrarian en la misma operacion.
+    $allButtons = @($btnRun, $btnAdd, $btnNote, $btnHealth, $btnCache, $btnBackup, $btnRestore, $btnRevert)
+    function Set-GuiBusy {
+        param([bool]$Busy)
+        foreach ($b in $allButtons) { $b.Enabled = -not $Busy }
+        $form.Cursor = $(if ($Busy) { [System.Windows.Forms.Cursors]::WaitCursor }
+                         else       { [System.Windows.Forms.Cursors]::Default })
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
     $btnRun.Add_Click({
+        $txtLog.Clear()
         $script:CopyMcpConfig = $chkCopyMcp.Checked
         $profs = Get-ConfiguredProfiles
         if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
-        Append-GuiLog "==> Ejecutando instalacion para perfiles: $($profs -join ', ')"
-        $form.Tag = @{ Action = 'Run'; Profiles = $profs }
-        $form.Close()
+        Append-GuiLog "==> Ejecutando configuracion para perfiles: $($profs -join ', ')"
+        Append-GuiLog '    (si toca copiar Claude, la ventana quedara sin responder unos minutos)'
+        Set-GuiBusy $true
+        try {
+            [void](Invoke-MultiSetup -TargetProfiles $profs -CopyMcp:$script:CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
+        }
+        catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
+        finally { Set-GuiBusy $false }
+        Refresh-ProfileList
     })
 
     $btnAdd.Add_Click({
@@ -1617,16 +2043,59 @@ function Show-GuiWindow {
                 [System.Windows.Forms.MessageBox]::Show("El perfil '$newName' ya existe.", "Claude Desktop", 'OK', 'Warning')
             } else {
                 $newList = @($profs) + $newName
-                Append-GuiLog "==> Anadiendo perfil '$newName'. Ejecutando configuracion..."
-                $form.Tag = @{ Action = 'Run'; Profiles = $newList }
-                $form.Close()
+                $txtLog.Clear()
+                Append-GuiLog "==> Anadiendo perfil '$newName'. Configurando..."
+                Set-GuiBusy $true
+                try {
+                    [void](Invoke-MultiSetup -TargetProfiles $newList -CopyMcp:$script:CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
+                }
+                catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
+                finally { Set-GuiBusy $false }
+                Refresh-ProfileList
             }
         }
     })
 
     $btnNote.Add_Click({
-        Edit-ProfileNotes
-        Refresh-ProfileList
+        $selItem = $lstProfiles.SelectedItem
+        if (-not $selItem) {
+            [System.Windows.Forms.MessageBox]::Show("Por favor selecciona un perfil de la lista para editar su nota/correo.", "Editar Nota", 'OK', 'Information')
+            return
+        }
+        $profName = ($selItem -replace '\s*\(.*\)$', '').Trim()
+        $currentNote = Get-ProfileNote -Name $profName
+        $newNote = Show-InputDialog -Prompt "Ingresa la nota/correo para '$profName':" -Title "Editar Nota/Email" -DefaultValue $currentNote
+        if ($newNote -ne $null) {
+            $profs = Get-ConfiguredProfileObjects
+            $found = $profs | Where-Object { $_.name -eq $profName } | Select-Object -First 1
+            if ($found) {
+                if ($found.PSObject.Properties.Name -contains 'note') { $found.note = $newNote.Trim() }
+                else { $found | Add-Member -NotePropertyName 'note' -NotePropertyValue $newNote.Trim() }
+            } else {
+                $profs += [pscustomobject]@{ name = $profName; note = $newNote.Trim() }
+            }
+            $cfgFile = Join-Path $script:HomeDir 'config.json'
+            if (Test-Path -LiteralPath $cfgFile) {
+                try {
+                    $cfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+                    $cfg.profiles = $profs
+                    $json = $cfg | ConvertTo-Json -Depth 8
+                    [IO.File]::WriteAllText($cfgFile, $json, (New-Object Text.UTF8Encoding($false)))
+                    Append-GuiLog "Nota de '$profName' actualizada a: '$($newNote.Trim())'."
+                } catch { }
+            }
+            $txtLog.Clear()
+            Append-GuiLog "==> Reconstruyendo accesos directos en el Escritorio con los nuevos nombres..."
+            $profsToUpdate = Get-ConfiguredProfiles
+            if ($profsToUpdate.Count -eq 0) { $profsToUpdate = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
+            Set-GuiBusy $true
+            try {
+                [void](Invoke-MultiSetup -TargetProfiles $profsToUpdate -CopyMcp:$script:CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
+            }
+            catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
+            finally { Set-GuiBusy $false }
+            Refresh-ProfileList
+        }
     })
 
     $btnHealth.Add_Click({
@@ -1643,26 +2112,46 @@ function Show-GuiWindow {
     })
 
     $btnBackup.Add_Click({
-        Export-ProfileBackup
+        $txtLog.Clear()
+        $dlgSave = New-Object System.Windows.Forms.SaveFileDialog
+        $dlgSave.Filter = "Archivos ZIP (*.zip)|*.zip"
+        $dlgSave.Title = "Guardar Backup de Perfiles"
+        $timestamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
+        $dlgSave.FileName = "ClaudeMulti_Backup_$timestamp.zip"
+        $dlgSave.InitialDirectory = [Environment]::GetFolderPath('Desktop')
+
+        if ($dlgSave.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            Export-ProfileBackup -DestinationZip $dlgSave.FileName
+        }
     })
 
     $btnRestore.Add_Click({
-        Import-ProfileBackup
-        Refresh-ProfileList
+        $txtLog.Clear()
+        $dlgOpen = New-Object System.Windows.Forms.OpenFileDialog
+        $dlgOpen.Filter = "Archivos ZIP (*.zip)|*.zip"
+        $dlgOpen.Title = "Seleccionar Backup a Restaurar"
+        $dlgOpen.InitialDirectory = [Environment]::GetFolderPath('Desktop')
+
+        if ($dlgOpen.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            Import-ProfileBackup -SourceZip $dlgOpen.FileName
+            Refresh-ProfileList
+        }
     })
 
     $btnRevert.Add_Click({
         $res = [System.Windows.Forms.MessageBox]::Show("Seguro que deseas revertir y eliminar los accesos directos y datos de perfiles extra?", "Confirmar Reversion", 'YesNo', 'Warning')
         if ($res -eq 'Yes') {
+            $txtLog.Clear()
             $profs = Get-ConfiguredProfiles
             if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
-            $form.Tag = @{ Action = 'Revert'; Profiles = $profs }
-            $form.Close()
+            Append-GuiLog "==> Revirtiendo instalacion de perfiles extra..."
+            Invoke-Revert -Names $profs -PortablePath $PortableDir -SkipConfirm:$true
+            Refresh-ProfileList
         }
     })
 
     [void]$form.ShowDialog()
-    return $form.Tag
+    $script:GuiLogger = $null
 }
 
 # ------------------------------------------------------------------- main ---
@@ -1672,25 +2161,27 @@ Write-Host '=============================================================' -Fore
 Write-Host ("  " + (Get-I18nStr 'HeaderTitle')) -ForegroundColor White
 Write-Host '=============================================================' -ForegroundColor White
 
-if (-not $PSBoundParameters.ContainsKey('Profiles') -and -not $Revert) {
-    if ([Environment]::UserInteractive -and -not $CLI) {
-        $guiRes = Show-GuiWindow
-        if ($guiRes) {
-            if ($guiRes.Profiles) { $Profiles = $guiRes.Profiles }
-            if ($guiRes.Action -eq 'Revert') { $Revert = $true }
-        }
-    } elseif ([Environment]::UserInteractive -and $CLI) {
+# -GUI abre la interfaz aunque se hayan pasado -Profiles; sin argumentos, la
+# interfaz es el modo por defecto y -CLI fuerza el menu de texto.
+$wantsInteractive = $GUI -or $CLI -or (-not $PSBoundParameters.ContainsKey('Profiles') -and -not $Revert)
+
+if ($wantsInteractive -and [Environment]::UserInteractive) {
+    if ($CLI) {
         $menuRes = Show-InteractiveMenu
         if ($menuRes) {
             if ($menuRes.Profiles) { $Profiles = $menuRes.Profiles }
             if ($menuRes.Revert)   { $Revert = $true }
         }
     }
+    else {
+        Show-GuiWindow
+        exit 0
+    }
+}
+elseif ($wantsInteractive -and -not $PSBoundParameters.ContainsKey('Profiles')) {
+    Write-Note 'Host no interactivo: se usan los perfiles por defecto.'
 }
 
-# Al invocar via .bat, cmd entrega "-Profiles A,B" como UN solo token y
-# powershell -File no lo parte en array. Se normaliza aqui para que
-# "-Profiles A,B" signifique lo mismo desde cmd que desde PowerShell.
 $Profiles = @(
     $Profiles |
     ForEach-Object { $_ -split ',' } |
@@ -1698,339 +2189,11 @@ $Profiles = @(
     Where-Object { $_ }
 )
 
-Assert-ProfileNames -Names $Profiles
-
 if ($Revert) {
     Invoke-Revert -Names $Profiles -PortablePath $PortableDir -SkipConfirm:$Force
     Write-Host ''
     exit 0
 }
 
-Write-Step 'Buscando la instalacion de Claude Desktop...'
-$install = Get-ClaudeInstall
-
-if (-not $install) {
-    Write-Err 'No se encontro Claude Desktop en este equipo.'
-    Write-Note 'Rutas revisadas: %LOCALAPPDATA%\AnthropicClaude, %ProgramFiles%\Claude y paquetes MSIX.'
-    Write-Note 'Instala Claude Desktop y vuelve a ejecutar este script.'
-    exit 1
-}
-
-Write-Ok "Modo de instalacion: $($install.Mode)"
-Write-Note "Carpeta: $($install.Dir)"
-if ($install.Version) { Write-Note "Version instalada: $($install.Version)" }
-
-$targetExe   = $install.Exe
-$portableNew = $false
-
-# --- Caso MSIX: se necesita copia portable ----------------------------------
-if ($install.Mode -eq 'Msix') {
-    Write-Step 'Instalacion tipo MSIX detectada (Microsoft Store).'
-    Write-Note 'Windows no permite lanzar el .exe desde WindowsApps con parametros,'
-    Write-Note 'asi que hay que hacer una copia portable en una carpeta normal.'
-
-    # --- Comprobar si la copia portable esta al dia -------------------------
-    $stamp      = Get-PortableStamp -PortablePath $PortableDir
-    $needsCopy  = $true
-    $copyReason = 'No hay copia portable todavia.'
-
-    if ($Force) {
-        $copyReason = 'Se pidio -Force: se rehace la copia.'
-    }
-    elseif ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
-        if ($stamp.version -eq $install.Version) {
-            $needsCopy  = $false
-            $targetExe  = $stamp.exe
-            Write-Ok "Copia portable al dia (version $($stamp.version)). No hay nada que actualizar."
-        }
-        else {
-            $copyReason = "Claude se actualizo: $($stamp.version) -> $($install.Version). Actualizando la copia..."
-        }
-    }
-    elseif ($stamp) {
-        $copyReason = 'La copia portable esta incompleta o movida: se rehace.'
-    }
-    elseif (Test-Path -LiteralPath $PortableDir) {
-        $copyReason = 'Hay una copia portable sin sello de version: se rehace para poder controlarla.'
-    }
-
-    if ($needsCopy) {
-        Write-Note $copyReason
-
-        # No se puede reemplazar la copia con la app abierta desde ella.
-        $running = @(Get-PortableProcess -PortablePath $PortableDir)
-        if ($running.Count -gt 0) {
-            Write-Warn "Hay $($running.Count) proceso(s) de Claude corriendo desde $PortableDir."
-            Write-Warn 'No se puede reemplazar la copia mientras esten abiertos.'
-            Write-Note 'Cierra esas ventanas de Claude y vuelve a ejecutar Setup-ClaudeMulti.bat.'
-            Write-Note 'Por ahora se sigue usando la copia actual.'
-            $needsCopy = $false
-            if ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
-                $targetExe = $stamp.exe
-            }
-            else {
-                $found = Get-ChildItem -LiteralPath $PortableDir -Filter 'claude.exe' -Recurse `
-                           -ErrorAction SilentlyContinue | Select-Object -First 1
-                if (-not $found) { throw "No se encontro claude.exe dentro de $PortableDir" }
-                $targetExe = $found.FullName
-            }
-        }
-    }
-
-    # Se intenta la copia primero: en muchos equipos WindowsApps es legible
-    # para el usuario y no hace falta ni admin ni tocar ACLs.
-    $copied = -not $needsCopy
-    if ($needsCopy) {
-        $portableNew = $true
-        try {
-            Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite
-            $copied = $true
-        }
-        catch {
-            Write-Warn $_.Exception.Message
-        }
-    }
-
-    if (-not $copied) {
-        # Puede fallar por la app abierta desde la copia, no solo por permisos.
-        if (@(Get-PortableProcess -PortablePath $PortableDir).Count -gt 0) {
-            Write-Host ''
-            Write-Err  'La actualizacion fallo: hay Claude abierto desde la copia portable.'
-            Write-Note 'Cierra todas las ventanas de Claude y vuelve a ejecutar el .bat.'
-            exit 1
-        }
-
-        Write-Host ''
-        Write-Warn 'La copia fallo por los permisos restrictivos de WindowsApps.'
-        Write-Warn 'La solucion es dar permiso de lectura al grupo Administradores'
-        Write-Warn 'sobre esa carpeta. ESTO MODIFICA LOS PERMISOS DE UNA CARPETA'
-        Write-Warn 'PROTEGIDA DE WINDOWS y en casos raros puede afectar las'
-        Write-Warn 'actualizaciones automaticas de la app.'
-
-        $allowed = [bool]$GrantWindowsAppsRead
-        if (-not $allowed) {
-            try {
-                $allowed = $PSCmdlet.ShouldContinue(
-                    "Dar lectura al grupo Administradores sobre $($install.Dir)?",
-                    'Permisos de WindowsApps')
-            }
-            catch {
-                Write-Err 'Ejecucion no interactiva: usa -GrantWindowsAppsRead para autorizarlo.'
-                $allowed = $false
-            }
-        }
-
-        if (-not $allowed) {
-            Write-Note 'Cancelado. Alternativa sin tocar permisos: crear un segundo'
-            Write-Note 'usuario de Windows y usar "Ejecutar como otro usuario".'
-            exit 1
-        }
-
-        if (-not (Test-Admin)) {
-            Write-Err 'Este paso necesita permisos de Administrador.'
-            Write-Note 'Cierra esta ventana y ejecuta Setup-ClaudeMulti.bat con boton'
-            Write-Note 'derecho -> "Ejecutar como administrador".'
-            exit 1
-        }
-
-        if ($PSCmdlet.ShouldProcess($install.Dir, 'takeown + icacls (lectura para Administradores)')) {
-            Write-Note 'Tomando posesion de la carpeta del paquete...'
-            & takeown.exe /F "$($install.Dir)" /R /D S | Out-Null
-            Write-Note 'Otorgando lectura a Administradores...'
-            & icacls.exe "$($install.Dir)" /grant '*S-1-5-32-544:(OI)(CI)(RX)' /T /C /Q | Out-Null
-
-            Copy-ToPortable -Source $install.Dir -Destination $PortableDir -Overwrite
-        }
-    }
-
-    if ($portableNew) {
-        # Resolver el exe dentro de la copia respetando su ruta relativa
-        # (en MSIX suele ser <paquete>\app\claude.exe, no la raiz).
-        $portableExe = $null
-        if ($install.Exe) {
-            $baseDir = $install.Dir.TrimEnd('\')
-            if ($install.Exe.StartsWith($baseDir, [StringComparison]::OrdinalIgnoreCase)) {
-                $rel         = $install.Exe.Substring($baseDir.Length).TrimStart('\')
-                $portableExe = Join-Path $PortableDir $rel
-            }
-        }
-        if (-not $portableExe -or -not (Test-Path -LiteralPath $portableExe)) {
-            $found = Get-ChildItem -LiteralPath $PortableDir -Filter 'claude.exe' -Recurse `
-                       -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) {
-                $portableExe = $found.FullName
-            }
-            elseif (-not $WhatIfPreference) {
-                throw "No se encontro claude.exe dentro de $PortableDir"
-            }
-            elseif (-not $portableExe) {
-                $portableExe = Join-Path $PortableDir 'claude.exe'
-            }
-        }
-        $targetExe = $portableExe
-
-        # Sellar la version: es lo que permite detectar la proxima actualizacion.
-        if (-not $WhatIfPreference) {
-            Set-PortableStamp -PortablePath $PortableDir -Version $install.Version `
-                              -Exe $targetExe -Source $install.Dir
-        }
-        Write-Ok "Copia portable lista (version $($install.Version)): $targetExe"
-    }
-}
-else {
-    Write-Ok 'No hace falta copia portable: el ejecutable se puede lanzar directo.'
-    if ($install.Exe -match '\\app-[0-9]') {
-        Write-Warn 'El ejecutable esta dentro de una carpeta con numero de version.'
-        Write-Warn 'Cuando Claude se actualice, esa ruta desaparece y los accesos'
-        Write-Warn 'directos dejaran de funcionar: vuelve a correr este script.'
-    }
-}
-
-if (-not $targetExe -or (-not (Test-Path -LiteralPath $targetExe) -and -not $WhatIfPreference)) {
-    throw 'No se pudo determinar el ejecutable de Claude Desktop.'
-}
-
-# --- Iconos y lanzador -------------------------------------------------------
-$iconDir = Join-Path $script:HomeDir 'icons'
-
-Write-Step 'Generando iconos de color por perfil...'
-$icons = @{}
-for ($i = 0; $i -lt $Profiles.Count; $i++) {
-    $n = $Profiles[$i]
-    try {
-        $ic = New-ProfileIcon -Name $n -Index $i -SourceExe $targetExe -OutDir $iconDir
-        $icons[$n] = $ic
-        Write-Ok "$n -> $($ic.Color)"
-    }
-    catch {
-        Write-Warn "No se pudo generar el icono de '$n': $($_.Exception.Message)"
-        Write-Note 'Se usara el icono normal de Claude.'
-        $icons[$n] = $null
-    }
-}
-
-if (-not $NoLauncher) {
-    Write-Step 'Instalando lanzador (comprueba actualizaciones antes de abrir)...'
-    Install-Launcher -HomePath $script:HomeDir
-    Write-Ok $script:HomeDir
-}
-
-# --- Crear los accesos directos ---------------------------------------------
-Write-Step 'Creando accesos directos en el Escritorio...'
-
-$wscript  = Join-Path $env:WINDIR 'System32\wscript.exe'
-$vbs      = Join-Path $script:HomeDir 'launch.vbs'
-$created  = @()
-$cfgProfs = @()
-
-for ($i = 0; $i -lt $Profiles.Count; $i++) {
-    $name     = $Profiles[$i]
-    $label    = Get-ProfileLabel -Name $name -Index $i
-    $iconPath = $(if ($icons[$name]) { $icons[$name].Path } else { $targetExe })
-    $color    = $(if ($icons[$name]) { $icons[$name].Color } else { '-' })
-    $useStore = ($i -eq 0 -and $install.Mode -eq 'Msix' -and $install.Aumid)
-
-    if ($i -eq 0) {
-        # Primer perfil: carpeta de datos por defecto -> conserva tu sesion actual.
-        $dataDir = Join-Path $env:APPDATA 'Claude'
-    }
-    else {
-        $dataDir = Join-Path $env:APPDATA "Claude-$name"
-        if (-not (Test-Path -LiteralPath $dataDir)) {
-            New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
-        }
-        if ($CopyMcpConfig) {
-            Copy-McpConfig -DestinationDir $dataDir -Overwrite:$Force
-        }
-    }
-
-    $note    = Get-ProfileNote -Name $name
-    $noteStr = $(if ($note) { " ($note)" } else { '' })
-
-    if ($useStore) {
-        # El paquete de la Store se actualiza solo: no hace falta lanzador.
-        $lnk = New-ClaudeShortcut -Name $label `
-                 -Target      (Join-Path $env:WINDIR 'explorer.exe') `
-                 -Arguments   "shell:AppsFolder\$($install.Aumid)" `
-                 -IconPath    $iconPath `
-                 -Description "Claude Desktop - perfil '$name'$noteStr (paquete de la Store)"
-        $via = 'Store'
-    }
-    elseif ($NoLauncher) {
-        $arg = $(if ($i -eq 0) { '' } else { "--user-data-dir=`"$dataDir`"" })
-        $lnk = New-ClaudeShortcut -Name $label -Target $targetExe -Arguments $arg `
-                 -IconPath $iconPath -Description "Claude Desktop - perfil '$name'$noteStr en $dataDir"
-        $via = 'Exe'
-    }
-    else {
-        $lnk = New-ClaudeShortcut -Name $label `
-                 -Target      $wscript `
-                 -Arguments   "`"$vbs`" `"$name`"" `
-                 -IconPath    $iconPath `
-                 -Description "Claude Desktop - perfil '$name'$noteStr (comprueba actualizaciones al abrir)"
-        $via = 'Lanzador'
-    }
-
-    $cfgProfs += [pscustomobject]@{
-        name     = $name
-        note     = $note
-        dataDir  = $dataDir
-        useStore = [bool]$useStore
-        exe      = $targetExe
-        icon     = $iconPath
-    }
-    $created += [pscustomobject]@{
-        Perfil = $name
-        Color  = $color
-        Lanza  = $via
-        Acceso = Split-Path -Leaf $lnk
-    }
-    Write-Ok "$label  [$color]"
-}
-
-if (-not $NoLauncher) {
-    Write-LauncherConfig -HomePath $script:HomeDir -Config ([pscustomobject]@{
-        mode        = $install.Mode
-        aumid       = $install.Aumid
-        portableDir = $PortableDir
-        sourceExe   = $install.Exe
-        version     = $install.Version
-        profiles    = $cfgProfs
-    })
-}
-
-# --- Resumen -----------------------------------------------------------------
-Write-Host ''
-Write-Host '=============================================================' -ForegroundColor White
-Write-Host '  Listo' -ForegroundColor Green
-Write-Host '=============================================================' -ForegroundColor White
-$created | Format-Table -AutoSize | Out-String | Write-Host
-
-Write-Host 'Como usarlo:' -ForegroundColor White
-Write-Note 'Abre el primer acceso directo -> es tu sesion de siempre.'
-Write-Note 'Abre el segundo y tercer acceso directo -> pediran login. Entra con cada cuenta.'
-Write-Note 'Las tres ventanas pueden estar abiertas al mismo tiempo.'
-Write-Note 'Cada acceso directo lleva una insignia de color con su inicial.'
-if (-not $NoLauncher) {
-    Write-Note 'Al abrir un perfil se comprueba si Claude tiene version nueva y,'
-    Write-Note 'si la hay, se actualiza la copia antes de arrancar la ventana.'
-}
-Write-Host ''
-Write-Host 'Importante:' -ForegroundColor Yellow
-Write-Note 'Cowork corre en una VM Hyper-V unica por maquina: solo una instancia'
-Write-Note 'puede usar Cowork a la vez.'
-if (-not $CopyMcpConfig) {
-    Write-Note 'Los perfiles nuevos arrancan SIN MCP servers. Usa -CopyMcpConfig para'
-    Write-Note 'copiarles los que tengas en el perfil por defecto.'
-}
-if ($install.Mode -eq 'Msix') {
-    if ($install.Aumid) {
-        Write-Note 'El primer perfil se lanza por el paquete de la Store: se actualiza solo.'
-    }
-    Write-Note 'La copia portable (perfiles extra) se refresca ejecutando de nuevo'
-    Write-Note 'Setup-ClaudeMulti.bat: detecta la version nueva y la copia sola.'
-}
-Write-Note 'Para revertir: vuelve a correr este script con -Revert y los mismos -Profiles.'
-Write-Host ''
-
+[void](Invoke-MultiSetup -TargetProfiles $Profiles -TargetPortableDir $PortableDir -CopyMcp:$CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
 exit 0
