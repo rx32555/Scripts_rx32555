@@ -133,7 +133,7 @@ Ambos deben quedar **en la misma carpeta**.
 | `-Profiles` | `'Cuenta1','Cuenta2','Cuenta3'` | Nombres de los perfiles. Acepta tres o más. |
 | `-GUI` | — | Abre la Interfaz Gráfica de Usuario nativa en Windows Forms. |
 | `-CLI` | — | Fuerza el modo consola de texto interactivo en terminal. |
-| `-Language` | Auto (`es`/`en`) | Idioma de la interfaz (`es` para español ASCII, `en` para inglés). |
+| `-Language` | Auto (según Windows) | Idioma de toda la interfaz: ventana, menú de texto y mensajes de progreso (`es` / `en`). |
 | `-PortableDir` | `C:\ClaudePortable` | Destino de la copia portable (solo MSIX). |
 | `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. Fusiona por clave: no pisa los MCP servers que ya tuviera ese perfil. |
 | `-SharedMemory` | — | Siembra en **todos** los perfiles dos MCP servers apuntando a una carpeta común, para que las cuentas compartan contexto. Requiere Node.js. |
@@ -163,6 +163,21 @@ powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Force
 ```
 
 ---
+
+## Idioma
+
+`-Language es` / `-Language en` cambian **todo** lo que se ve: los botones y diálogos de la ventana, el menú de texto y los ~130 mensajes de progreso que salen por consola (y que la ventana reproduce en su panel de log). Sin el parámetro, se elige por el idioma de Windows.
+
+También cambia el nombre de los accesos directos:
+
+```
+es  ->  Claude - Cuenta1 (correo@x.com) (perfil actual).lnk
+en  ->  Claude - Cuenta1 (correo@x.com) (current profile).lnk
+```
+
+El script reconoce los dos sufijos, así que si cambias de idioma reemplaza el acceso viejo en vez de dejar dos en el Escritorio.
+
+El texto de la interfaz es ASCII puro a propósito (`configuracion`, no `configuración`): la consola de Windows no tiene un juego de caracteres fiable y los acentos salían como símbolos raros.
 
 ## Qué se comparte y qué no
 

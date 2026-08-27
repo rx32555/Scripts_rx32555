@@ -103,115 +103,490 @@ else {
 
 $script:I18n = @{
     es = @{
-        HeaderTitle          = 'Claude Desktop - configuracion de multiples instancias'
-        MenuTitle            = 'Claude Desktop - Multi Instancia (Menu)'
-        CurrentInstances     = 'Instancias configuradas actualmente'
-        CopyMcpsLabel        = 'Copiar MCPs (-CopyMcpConfig)'
-        MenuOpt1             = 'Ejecutar / Actualizar instalacion actual ({0})'
-        MenuOpt2             = 'Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
-        MenuOpt3             = 'Anadir una nueva instancia / perfil (ej: "Cuenta4" o "Trabajo")'
-        MenuOpt4             = 'Alternar copia de MCPs a nuevos perfiles'
-        MenuOpt5             = 'Revertir / Eliminar perfiles'
-        MenuOpt6             = 'Salir'
-        SelectOpt            = 'Selecciona una opcion (1-6)'
-        EnterTotalNum        = 'Ingresa el numero total de instancias deseado (ej: 4)'
-        InvalidNum           = 'Numero no valido.'
-        EnterNewName         = 'Ingresa el nombre del nuevo perfil o instancia (ej: Cuenta4 o Trabajo)'
-        ProfileExists        = 'El perfil "{0}" ya existe.'
-        NameCannotBeEmpty    = 'El nombre no puede estar vacio.'
-        CopyMcpsActive       = 'Copia de MCPs: ACTIVADA'
-        CopyMcpsInactive     = 'Copia de MCPs: DESACTIVADA'
-        WarnDeleteData       = 'Se eliminaran accesos directos y datos de perfiles extra.'
-        ConfirmRevert        = 'Confirmas revertir la configuracion? (S/N)'
-        OpCancelled          = 'Operacion cancelada.'
-        InvalidOpt           = 'Opcion invalida.'
-        SearchingInstall     = 'Buscando la instalacion de Claude Desktop...'
-        NotFound             = 'No se encontro Claude Desktop en este equipo.'
-        InstallMode          = 'Modo de instalacion: {0}'
-        FolderLabel          = 'Carpeta: {0}'
-        InstalledVer         = 'Version instalada: {0}'
-        MsixDetected         = 'Instalacion tipo MSIX detectada (Microsoft Store).'
-        MsixNote             = 'Windows no permite lanzar el .exe desde WindowsApps con parametros, asi que hay que hacer una copia portable en una carpeta normal.'
-        PortableUpToDate     = 'Copia portable al dia (version {0}). No hay nada que actualizar.'
-        GeneratingIcons      = 'Generando iconos de color por perfil...'
-        InstallingLauncher   = 'Instalando lanzador (comprueba actualizaciones antes de abrir)...'
-        CreatingShortcuts    = 'Creando accesos directos en el Escritorio...'
-        ShortcutExists       = 'Ya existia "{0}.lnk" en el Escritorio: se sobrescribe.'
-        ProfileLabelOriginal = 'Claude - {0} (perfil actual)'
-        ProfileLabelExtra    = 'Claude - {0}'
-        ReadyTitle           = 'Listo'
-        HeaderPerfil         = 'Perfil'
-        HeaderColor          = 'Color'
-        HeaderLanza          = 'Lanza'
-        HeaderAcceso         = 'Acceso'
-        HowToUse             = 'Como usarlo:'
-        UseFirstLnk          = 'Abre el primer acceso directo -> es tu sesion de siempre.'
-        UseOtherLnks         = 'Abre los accesos directos de las otras cuentas -> pediran login. Entra con cada cuenta.'
-        AllWindowsOpen       = 'Las ventanas pueden estar abiertas al mismo tiempo.'
-        BadgeNote            = 'Cada acceso directo lleva una insignia de color con su inicial.'
-        UpdateCheckNote      = 'Al abrir un perfil se comprueba si Claude tiene version nueva y la actualiza.'
-        ImportantTitle       = 'Importante:'
-        CoworkNote           = 'Cowork corre en una VM Hyper-V unica por maquina: solo una instancia puede usar Cowork a la vez.'
-        NoMcpNote            = 'Los perfiles nuevos arrancan SIN MCP servers. Usa -CopyMcpConfig para copiar los del perfil por defecto.'
-        StoreNote            = 'El primer perfil se lanza por el paquete de la Store: se actualiza solo.'
-        RevertCmdNote        = 'Para revertir: vuelve a correr este script con -Revert.'
+        HeaderTitle               = 'Claude Desktop - configuracion de multiples instancias'
+        MenuTitle                 = 'Claude Desktop - Multi Instancia (Menu)'
+        CurrentInstances          = 'Instancias configuradas actualmente'
+        ReadyTitle                = 'Listo'
+        HeaderPerfil              = 'Perfil'
+        HeaderColor               = 'Color'
+        HeaderLanza               = 'Lanza'
+        HeaderAcceso              = 'Acceso'
+        ProfileLabelOriginal      = 'Claude - {0} (perfil actual)'
+        ProfileLabelOriginalNote  = 'Claude - {0} ({1}) (perfil actual)'
+        ProfileLabelExtra         = 'Claude - {0}'
+        ProfileLabelExtraNote     = 'Claude - {0} ({1})'
+        CopyMcpsLabel             = 'Copiar MCPs (-CopyMcpConfig)'
+        SharedMemLabel            = 'Memoria compartida (-SharedMemory)'
+        SharedMemOnAt             = 'SI -> {0}'
+        NoShort                   = 'NO'
+        MenuOpt1                  = '[1] Ejecutar / Actualizar instalacion actual ({0})'
+        MenuOpt2                  = '[2] Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
+        MenuOpt3                  = '[3] Anadir una nueva instancia / perfil (ej: "Cuenta4" o "Trabajo")'
+        MenuOpt4                  = '[4] Asignar nota / correo a un perfil (ej: trabajo@empresa.com)'
+        MenuOpt5                  = '[5] Diagnostico de salud del sistema (Health Check)'
+        MenuOpt6                  = '[6] Limpiar cache y archivos temporales (liberar espacio en disco)'
+        MenuOpt7                  = '[7] Crear Backup de perfiles (.zip)'
+        MenuOpt8                  = '[8] Restaurar perfiles desde Backup (.zip)'
+        MenuOpt9                  = '[9] Alternar copia de MCPs a nuevos perfiles'
+        MenuOpt10                 = '[10] Alternar memoria compartida entre instancias (MCP)'
+        MenuOpt11                 = '[11] Revertir / Eliminar perfiles'
+        MenuOpt0                  = '[0] Salir'
+        SelectOpt                 = 'Selecciona una opcion (0-11)'
+        EnterTotalNum             = 'Ingresa el numero total de instancias deseado (ej: 4)'
+        InvalidNum                = 'Numero no valido.'
+        EnterNewName              = 'Ingresa el nombre del nuevo perfil o instancia (ej: Cuenta4 o Trabajo)'
+        ProfileExists             = 'El perfil "{0}" ya existe.'
+        NameCannotBeEmpty         = 'El nombre no puede estar vacio.'
+        CopyMcpsActive            = 'Copia de MCPs: ACTIVADA'
+        CopyMcpsInactive          = 'Copia de MCPs: DESACTIVADA'
+        WarnDeleteData            = 'Se eliminaran accesos directos y datos de perfiles extra.'
+        ConfirmRevert             = 'Confirmas revertir la configuracion? (S/N)'
+        OpCancelled               = 'Operacion cancelada.'
+        InvalidOpt                = 'Opcion invalida.'
+        AskDeepClean              = 'Borrar tambien la imagen de la VM de Cowork? (S/N)'
+        AskBackupPath             = 'Ingresa la ruta completa del archivo .zip de backup'
+        AskProfileToEdit          = 'Selecciona el numero de perfil a editar (vacio para cancelar)'
+        AskNoteFor                = 'Ingresa la nota/correo para "{0}" (vacio para borrar)'
+        EditNotesTitle            = '--- Asignar Nota / Correo a Perfil ---'
+        SharedMemOn               = 'Memoria compartida: ACTIVADA -> {0}'
+        SharedMemOff              = 'Memoria compartida: DESACTIVADA (no se quita de los perfiles ya configurados).'
+        SharedMemApplyHint        = 'Se aplica al ejecutar la opcion [1].'
+        NoNpxWarnMenu             = 'No se encontro npx en el PATH. Instala Node.js o los servidores no arrancaran.'
+        GuiTitle                  = 'Claude Desktop - Multi Instancia'
+        GuiBtnRun                 = 'Ejecutar / Actualizar Instancias'
+        GuiBtnAdd                 = '+ Anadir Perfil'
+        GuiBtnNote                = 'Editar Nota/Email'
+        GuiBtnHealth              = 'Health Check'
+        GuiBtnCache               = 'Limpiar Cache'
+        GuiBtnBackup              = 'Crear Backup (.zip)'
+        GuiBtnRestore             = 'Restaurar Backup'
+        GuiBtnRevert              = 'Revertir / Eliminar Perfiles Extra'
+        GuiRunning                = '==> Ejecutando configuracion para perfiles: {0}'
+        GuiRunningHint            = '    (si toca copiar Claude, la ventana quedara sin responder unos minutos)'
+        GuiAddPrompt              = 'Ingresa el nombre de la nueva instancia:'
+        GuiAddTitle               = 'Anadir Perfil'
+        GuiAddDefault             = 'Trabajo'
+        GuiAdding                 = '==> Anadiendo perfil "{0}". Configurando...'
+        GuiPickProfile            = 'Por favor selecciona un perfil de la lista para editar su nota/correo.'
+        GuiNotePrompt             = 'Ingresa la nota/correo para "{0}":'
+        GuiNoteTitle              = 'Editar Nota/Email'
+        GuiNoteUpdated            = 'Nota de "{0}" actualizada a: "{1}".'
+        GuiRebuilding             = '==> Reconstruyendo accesos directos en el Escritorio con los nuevos nombres...'
+        GuiStartHealth            = 'Iniciando Diagnostico Health Check...'
+        GuiStartCache             = 'Iniciando Limpieza de Cache...'
+        GuiZipFilter              = 'Archivos ZIP (*.zip)|*.zip'
+        GuiSaveBackupTitle        = 'Guardar Backup de Perfiles'
+        GuiOpenBackupTitle        = 'Seleccionar Backup a Restaurar'
+        GuiConfirmRevert          = 'Seguro que deseas revertir y eliminar los accesos directos y datos de perfiles extra?'
+        GuiConfirmRevertTitle     = 'Confirmar Reversion'
+        GuiReverting              = '==> Revirtiendo instalacion de perfiles extra...'
+        GuiDeepCleanTitle         = 'Limpieza profunda'
+        GuiPermTitle              = 'Permisos WindowsApps'
+        GuiPermAsk                = 'Dar permisos de lectura al grupo Administradores sobre {0}?'
+        MsgOneProfileOnly         = 'Solo se indico un perfil: no se crea ninguna instancia adicional.'
+        MsgNoAppx                 = 'Get-AppxPackage no esta disponible en esta edicion de PowerShell.'
+        MsgNoAppx2                = 'No se puede detectar una instalacion de Microsoft Store desde aqui.'
+        MsgNoAppx3                = 'Vuelve a ejecutar con Windows PowerShell 5.1:'
+        MsgShortcutExists         = 'Ya existia ''{0}.lnk'' en el Escritorio: se sobrescribe.'
+        MsgNoAppx4                = '  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1'
+        MsgReuseCopy              = 'Se reutilizara la copia existente.'
+        MsgDeletingOldCopy        = 'Borrando copia anterior...'
+        MsgCopying                = 'Copiando {0}'
+        MsgCopyingTo              = '     ->  {0}'
+        MsgBadJsonKeep            = 'No se pudo leer {0} como JSON: se deja como esta.'
+        MsgServerKept             = '''{0}'' ya existe en {1} y se conserva (usa -Force para reemplazarlo).'
+        MsgNoSrcConfig            = 'No hay claude_desktop_config.json en {0}; no se copian MCPs.'
+        MsgBadSrcJson             = 'No se pudo leer {0} como JSON; no se copian MCPs.'
+        MsgNoMcpsToCopy           = 'Tu perfil actual no tiene MCP servers configurados: no hay nada que copiar.'
+        MsgMcpsCopied             = 'MCPs copiados ({0}) -> {1}'
+        StepDeletingShortcuts     = 'Borrando accesos directos...'
+        MsgDeleted                = 'Borrado: {0}'
+        StepDeletingProfileData   = 'Borrando carpetas de datos de los perfiles extra...'
+        MsgNoExtraData            = 'No hay carpetas de perfiles extra que borrar.'
+        MsgNoConfirmHost          = 'No se puede pedir confirmacion en este host.'
+        MsgAddForce               = 'Anade -Force para borrar las carpetas de datos sin preguntar.'
+        MsgDataKept               = 'Carpetas de datos conservadas.'
+        StepRemovingShared        = 'Quitando los servidores de memoria compartida del perfil principal...'
+        MsgRemoved                = 'Quitados: {0}'
+        MsgNoSharedToRemove       = 'No habia servidores compartidos que quitar.'
+        StepDeletingLauncher      = 'Borrando lanzador e iconos...'
+        MsgDoesNotExist           = 'No existe {0}.'
+        StepDeletingPortable      = 'Borrando la copia portable...'
+        MsgUntouchedMain          = 'Intacto: {0} (tu perfil original).'
+        MsgUntouchedShared        = 'Intacto: {0} (memoria compartida). Borrala a mano si ya no la quieres.'
+        MsgNoteUpdated            = 'Nota de ''{0}'' actualizada.'
+        MsgCfgUpdateFailed        = 'No se pudo actualizar config.json: {0}'
+        HcTitle                   = '  Diagnostico de Salud del Sistema (Health Check)'
+        HcMainExe                 = 'Ejecutable principal: {0}'
+        MsgInstallMode            = 'Modo de instalacion: {0}'
+        MsgInstalledVer           = 'Version instalada: {0}'
+        HcNoInstall               = 'No se detecto instalacion activa de Claude Desktop.'
+        HcLauncherDir             = 'Carpeta de lanzadores e iconos: {0} [OK]'
+        HcNoLauncherDir           = 'No existe la carpeta de lanzadores: {0}'
+        HcProfileStates           = 'Estado de perfiles configurados:'
+        HcNotCreated              = 'No creada'
+        HcLnkOk                   = 'Acceso directo [OK]'
+        HcLnkMissing              = 'Acceso directo [FALTA]'
+        HcProfileLine             = '{0}{1} -> {2} | {3}'
+        HcNoProfiles              = 'No hay perfiles configurados actualmente.'
+        HcOrphans                 = 'Perfiles huerfanos (existen en disco pero no en config.json):'
+        PairArrow                 = '{0} -> {1}'
+        HcOrphanHint1             = 'Vuelve a ejecutar la configuracion incluyendolos en -Profiles'
+        HcOrphanHint2             = 'para readoptarlos, o borra la carpeta a mano si ya no los usas.'
+        HcSharedTitle             = 'Memoria compartida entre instancias:'
+        HcSharedOn                = 'Activa -> {0} ({1} KB de memoria, {2} documento(s) .md)'
+        HcSharedNoDir             = 'Activa en config.json pero la carpeta no existe: {0}'
+        HcSharedConnected         = '  {0} -> conectado'
+        HcSharedMissing           = '  {0} -> SIN los servidores compartidos'
+        HcNoNpx                   = '  npx no esta en el PATH: los servidores compartidos no van a arrancar.'
+        HcSharedOff               = 'Desactivada. Activala con -SharedMemory o desde la interfaz.'
+        HcRunningProcs            = 'Procesos de Claude en ejecucion: {0}'
+        MsgOldBinaryDeleted       = 'Binario viejo borrado: {0}\claude-code\{1}'
+        CacheTitle                = '--- Limpiador de Cache y Archivos Temporales ---'
+        MsgProcsRunning           = 'Hay {0} proceso(s) de Claude en ejecucion.'
+        MsgCloseBeforeClean       = 'Cierra todas las ventanas de Claude antes de limpiar la cache.'
+        MsgNoProfilesToClean      = 'No se encontraron carpetas de perfiles para limpiar.'
+        MsgCleanDone              = 'Limpieza completada. Espacio en disco liberado: {0} MB'
+        MsgHeavyPending           = 'Ademas hay {0} MB en la imagen de la VM de Cowork ({1}).'
+        MsgHeavyHint              = 'Se puede borrar, pero la app la vuelve a descargar entera la proxima vez que uses Cowork.'
+        BackupTitle               = '--- Respaldar Perfiles (Backup .zip) ---'
+        MsgCloseBeforeBackup      = 'Cierra todas las ventanas de Claude antes de respaldar:'
+        MsgCloseBeforeBackup2     = 'con la app abierta, la sesion queda bloqueada y no se copia.'
+        MsgBackupHasTokens        = 'El backup incluye los tokens de sesion de todas las cuentas.'
+        MsgBackupKeepSafe         = 'Guarda el .zip en un sitio seguro: equivale a tus credenciales.'
+        MsgFilesInUse             = 'Algunos archivos de "{0}" estaban en uso y se omitieron.'
+        MsgIncluded               = 'Incluido: {0}'
+        MsgBackupOk               = 'Backup creado exitosamente:'
+        MsgBackupPath             = '{0} ({1} MB)'
+        MsgBackupIncomplete       = '{0} perfil(es) quedaron incompletos por archivos en uso.'
+        MsgBackupError            = 'Error al crear el backup: {0}'
+        MsgFileNotFound           = 'No se encontro el archivo: {0}'
+        MsgCloseBeforeRestore     = 'Cierra todas las ventanas de Claude antes de restaurar.'
+        MsgLauncherRestored       = 'Configuracion de lanzador restaurada.'
+        MsgProfileRestored        = 'Restaurado perfil: {0}'
+        MsgRestoreOk              = 'Restauracion completada exitosamente.'
+        MsgRestoreHint            = 'Se recomienda ejecutar la configuracion para actualizar los accesos directos.'
+        MsgRestoreError           = 'Error al restaurar el backup: {0}'
+        StepSearchingInstall      = 'Buscando la instalacion de Claude Desktop...'
+        MsgNotFound               = 'No se encontro Claude Desktop en este equipo.'
+        MsgPathsChecked           = 'Rutas revisadas: %LOCALAPPDATA%\AnthropicClaude, %ProgramFiles%\Claude y paquetes MSIX.'
+        MsgInstallClaude          = 'Instala Claude Desktop y vuelve a ejecutar este script.'
+        MsgFolder                 = 'Carpeta: {0}'
+        StepMsixDetected          = 'Instalacion tipo MSIX detectada (Microsoft Store).'
+        MsgMsixNote1              = 'Windows no permite lanzar el .exe desde WindowsApps con parametros,'
+        MsgMsixNote2              = 'asi que hay que hacer una copia portable en una carpeta normal.'
+        MsgPortableUpToDate       = 'Copia portable al dia (version {0}). No hay nada que actualizar.'
+        MsgNoPortableYet          = 'No hay copia portable todavia.'
+        MsgForceRecopy            = 'Se pidio -Force: se rehace la copia.'
+        MsgClaudeUpdated          = 'Claude se actualizo: {0} -> {1}. Actualizando la copia...'
+        MsgPortableIncomplete     = 'La copia portable esta incompleta o movida: se rehace.'
+        MsgPortableNoStamp        = 'Hay una copia portable sin sello de version: se rehace para poder controlarla.'
+        MsgPortableBusy           = 'Hay {0} proceso(s) de Claude corriendo desde {1}.'
+        MsgCannotReplace          = 'No se puede reemplazar la copia mientras esten abiertos.'
+        MsgCloseAndRetry          = 'Cierra esas ventanas de Claude y vuelve a intentar.'
+        MsgKeepUsingCurrent       = 'Por ahora se sigue usando la copia actual.'
+        MsgUpdateFailedBusy       = 'La actualizacion fallo: hay Claude abierto desde la copia portable.'
+        MsgCloseAllAndRetry       = 'Cierra todas las ventanas de Claude y vuelve a intentar.'
+        MsgCopyFailedPerms        = 'La copia fallo por los permisos restrictivos de WindowsApps.'
+        MsgPermsFix1              = 'La solucion es dar permiso de lectura al grupo Administradores'
+        MsgPermsFix2              = 'sobre esa carpeta.'
+        MsgPermsAsk               = 'Dar lectura al grupo Administradores sobre {0}?'
+        MsgPermsCaption           = 'Permisos de WindowsApps'
+        MsgNonInteractive         = 'Ejecucion no interactiva: usa -GrantWindowsAppsRead para autorizarlo.'
+        MsgCancelled              = 'Cancelado.'
+        MsgNeedsAdmin             = 'Este paso necesita permisos de Administrador.'
+        MsgRunAsAdmin             = 'Cierra esta ventana y ejecuta con "Ejecutar como administrador".'
+        MsgTakingOwnership        = 'Tomando posesion de la carpeta del paquete...'
+        MsgGrantingRead           = 'Otorgando lectura a Administradores...'
+        MsgPortableReady          = 'Copia portable lista (version {0}): {1}'
+        MsgNoPortableNeeded       = 'No hace falta copia portable: el ejecutable se puede lanzar directo.'
+        MsgVersionedFolder        = 'El ejecutable esta dentro de una carpeta con numero de version.'
+        StepPreparingShared       = 'Preparando la memoria compartida entre instancias...'
+        MsgNoNpxSetup             = 'No se encontro npx en el PATH: los servidores MCP compartidos necesitan Node.js.'
+        MsgNodeOutsidePath        = 'Node parece estar en {0} pero no esta en el PATH.'
+        MsgAddToPath              = 'Anade esa carpeta al PATH y vuelve a ejecutar con -SharedMemory.'
+        MsgInstallNode            = 'Instala Node.js (https://nodejs.org) y vuelve a ejecutar con -SharedMemory.'
+        MsgRestContinues          = 'El resto de la configuracion sigue normalmente.'
+        MsgSharedFolder           = 'Carpeta compartida: {0}'
+        MsgNpxAt                  = 'npx: {0}'
+        StepGeneratingIcons       = 'Generando iconos de color por perfil...'
+        MsgIconFailed             = 'No se pudo generar el icono de ''{0}'': {1}'
+        StepInstallingLauncher    = 'Instalando lanzador (comprueba actualizaciones antes de abrir)...'
+        StepCreatingShortcuts     = 'Creando accesos directos en el Escritorio...'
+        MsgWhatIfRemoveOld        = 'Whatif: se borraria el acceso anterior: {0}'
+        MsgRemovedOldLnk          = 'Removido acceso directo anterior: {0}'
+        MsgSharedInProfile        = 'Memoria compartida en "{0}" ({1}).'
+        MsgProfileDone            = '{0}  [{1}]'
+        MsgNonInteractiveDefaults = 'Host no interactivo: se usan los perfiles por defecto.'
+        DescStore                 = 'Claude Desktop - perfil "{0}"{1} (paquete de la Store)'
+        DescExe                   = 'Claude Desktop - perfil "{0}"{1} en {2}'
+        DescLauncher              = 'Claude Desktop - perfil "{0}"{1} (comprueba actualizaciones al abrir)'
+        ErrEmptyProfiles          = 'La lista de perfiles esta vacia.'
+        ErrEmptyName              = 'Hay un nombre de perfil vacio en -Profiles.'
+        ErrBadChars               = 'El nombre de perfil ''{0}'' contiene caracteres no validos para un archivo o carpeta.'
+        ErrBadEdges               = 'El nombre de perfil ''{0}'' no puede empezar/terminar en espacio ni terminar en punto.'
+        ErrDupNames               = 'Hay nombres de perfil repetidos: {0}'
+        ErrRobocopy               = 'robocopy fallo (codigo {0}). Probablemente por permisos de WindowsApps.'
+        ErrRobocopyProfile        = 'robocopy fallo copiando {0} (codigo {1}).'
+        ErrNoClaudeExe            = 'No se encontro claude.exe dentro de {0}'
+        ErrNoTargetExe            = 'No se pudo determinar el ejecutable de Claude Desktop.'
+        MenuProfileLine           = '  [{0}] {1}{2}'
+        GuiDeepCleanMsg           = 'Quedan {0} MB en la imagen de la VM de Cowork.`n`nSe puede borrar, pero la app la volvera a descargar entera la proxima vez que uses Cowork.`n`nBorrarla igual?'
+        YesShort                  = 'SI'
+        ColorAzul                 = 'azul'
+        ColorVerde                = 'verde'
+        ColorMorado               = 'morado'
+        ColorCian                 = 'cian'
+        ColorRosa                 = 'rosa'
+        ColorAzabache             = 'azabache'
+        ColorOliva                = 'oliva'
+        ViaStore                  = 'Store'
+        ViaExe                    = 'Exe'
+        ViaLauncher               = 'Lanzador'
     }
     en = @{
-        HeaderTitle          = 'Claude Desktop - Multi-Instance Setup'
-        MenuTitle            = 'Claude Desktop - Multi-Instance (Menu)'
-        CurrentInstances     = 'Currently configured instances'
-        CopyMcpsLabel        = 'Copy MCPs (-CopyMcpConfig)'
-        MenuOpt1             = 'Run / Update current installation ({0})'
-        MenuOpt2             = 'Specify total number of instances (e.g. 4 -> Cuenta1..Cuenta4)'
-        MenuOpt3             = 'Add a new instance / profile (e.g. "Cuenta4" or "Work")'
-        MenuOpt4             = 'Toggle copying MCPs to new profiles'
-        MenuOpt5             = 'Revert / Delete profiles'
-        MenuOpt6             = 'Exit'
-        SelectOpt            = 'Select an option (1-6)'
-        EnterTotalNum        = 'Enter desired total number of instances (e.g. 4)'
-        InvalidNum           = 'Invalid number.'
-        EnterNewName         = 'Enter name for the new profile or instance (e.g. Cuenta4 or Work)'
-        ProfileExists        = 'Profile "{0}" already exists.'
-        NameCannotBeEmpty    = 'Name cannot be empty.'
-        CopyMcpsActive       = 'Copy MCPs: ENABLED'
-        CopyMcpsInactive     = 'Copy MCPs: DISABLED'
-        WarnDeleteData       = 'Shortcuts and extra profile data will be deleted.'
-        ConfirmRevert        = 'Are you sure you want to revert configuration? (Y/N)'
-        OpCancelled          = 'Operation cancelled.'
-        InvalidOpt           = 'Invalid option.'
-        SearchingInstall     = 'Searching for Claude Desktop installation...'
-        NotFound             = 'Claude Desktop was not found on this computer.'
-        InstallMode          = 'Installation mode: {0}'
-        FolderLabel          = 'Folder: {0}'
-        InstalledVer         = 'Installed version: {0}'
-        MsixDetected         = 'MSIX installation detected (Microsoft Store).'
-        MsixNote             = 'Windows does not allow launching the .exe from WindowsApps with parameters, so a portable copy is made to a normal folder.'
-        PortableUpToDate     = 'Portable copy up to date (version {0}). Nothing to update.'
-        GeneratingIcons      = 'Generating colored icons per profile...'
-        InstallingLauncher   = 'Installing launcher (checks for updates before opening)...'
-        CreatingShortcuts    = 'Creating desktop shortcuts...'
-        ShortcutExists       = '"{0}.lnk" already exists on Desktop: overwriting.'
-        ProfileLabelOriginal = 'Claude - {0} (current profile)'
-        ProfileLabelExtra    = 'Claude - {0}'
-        ReadyTitle           = 'Ready'
-        HeaderPerfil         = 'Profile'
-        HeaderColor          = 'Color'
-        HeaderLanza          = 'Launcher'
-        HeaderAcceso         = 'Shortcut'
-        HowToUse             = 'How to use it:'
-        UseFirstLnk          = 'Open the first shortcut -> this is your usual session.'
-        UseOtherLnks         = 'Open shortcuts for other accounts -> they will prompt for login.'
-        AllWindowsOpen       = 'All windows can be open at the same time.'
-        BadgeNote            = 'Each shortcut has a colored badge with its initial.'
-        UpdateCheckNote      = 'Opening a profile checks if Claude has a new version and updates it.'
-        ImportantTitle       = 'Important:'
-        CoworkNote           = 'Cowork runs in a single Hyper-V VM per machine: only one instance can use Cowork at a time.'
-        NoMcpNote            = 'New profiles start WITHOUT MCP servers. Use -CopyMcpConfig to copy them from default profile.'
-        StoreNote            = 'The first profile launches via the Store package: updates automatically.'
-        RevertCmdNote        = 'To revert: run this script again with -Revert.'
+        HeaderTitle               = 'Claude Desktop - Multi-Instance Setup'
+        MenuTitle                 = 'Claude Desktop - Multi-Instance (Menu)'
+        CurrentInstances          = 'Currently configured instances'
+        ReadyTitle                = 'Ready'
+        HeaderPerfil              = 'Profile'
+        HeaderColor               = 'Color'
+        HeaderLanza               = 'Launcher'
+        HeaderAcceso              = 'Shortcut'
+        ProfileLabelOriginal      = 'Claude - {0} (current profile)'
+        ProfileLabelOriginalNote  = 'Claude - {0} ({1}) (current profile)'
+        ProfileLabelExtra         = 'Claude - {0}'
+        ProfileLabelExtraNote     = 'Claude - {0} ({1})'
+        CopyMcpsLabel             = 'Copy MCPs (-CopyMcpConfig)'
+        SharedMemLabel            = 'Shared memory (-SharedMemory)'
+        SharedMemOnAt             = 'YES -> {0}'
+        NoShort                   = 'NO'
+        MenuOpt1                  = '[1] Run / Update current installation ({0})'
+        MenuOpt2                  = '[2] Set total number of instances (e.g. 4 -> Cuenta1..Cuenta4)'
+        MenuOpt3                  = '[3] Add a new instance / profile (e.g. "Cuenta4" or "Work")'
+        MenuOpt4                  = '[4] Assign a note / email to a profile (e.g. work@company.com)'
+        MenuOpt5                  = '[5] System health check'
+        MenuOpt6                  = '[6] Clean cache and temporary files (free up disk space)'
+        MenuOpt7                  = '[7] Create profile backup (.zip)'
+        MenuOpt8                  = '[8] Restore profiles from backup (.zip)'
+        MenuOpt9                  = '[9] Toggle copying MCPs to new profiles'
+        MenuOpt10                 = '[10] Toggle shared memory across instances (MCP)'
+        MenuOpt11                 = '[11] Revert / Delete profiles'
+        MenuOpt0                  = '[0] Exit'
+        SelectOpt                 = 'Select an option (0-11)'
+        EnterTotalNum             = 'Enter the desired total number of instances (e.g. 4)'
+        InvalidNum                = 'Invalid number.'
+        EnterNewName              = 'Enter the name of the new profile or instance (e.g. Cuenta4 or Work)'
+        ProfileExists             = 'Profile "{0}" already exists.'
+        NameCannotBeEmpty         = 'Name cannot be empty.'
+        CopyMcpsActive            = 'Copy MCPs: ENABLED'
+        CopyMcpsInactive          = 'Copy MCPs: DISABLED'
+        WarnDeleteData            = 'Shortcuts and extra profile data will be deleted.'
+        ConfirmRevert             = 'Confirm reverting the configuration? (Y/N)'
+        OpCancelled               = 'Operation cancelled.'
+        InvalidOpt                = 'Invalid option.'
+        AskDeepClean              = 'Delete the Cowork VM image too? (Y/N)'
+        AskBackupPath             = 'Enter the full path to the backup .zip file'
+        AskProfileToEdit          = 'Select the profile number to edit (empty to cancel)'
+        AskNoteFor                = 'Enter the note/email for "{0}" (empty to clear)'
+        EditNotesTitle            = '--- Assign Note / Email to Profile ---'
+        SharedMemOn               = 'Shared memory: ENABLED -> {0}'
+        SharedMemOff              = 'Shared memory: DISABLED (not removed from already-configured profiles).'
+        SharedMemApplyHint        = 'It is applied when you run option [1].'
+        NoNpxWarnMenu             = 'npx was not found on PATH. Install Node.js or the servers will not start.'
+        GuiTitle                  = 'Claude Desktop - Multi-Instance'
+        GuiBtnRun                 = 'Run / Update Instances'
+        GuiBtnAdd                 = '+ Add Profile'
+        GuiBtnNote                = 'Edit Note/Email'
+        GuiBtnHealth              = 'Health Check'
+        GuiBtnCache               = 'Clean Cache'
+        GuiBtnBackup              = 'Create Backup (.zip)'
+        GuiBtnRestore             = 'Restore Backup'
+        GuiBtnRevert              = 'Revert / Delete Extra Profiles'
+        GuiRunning                = '==> Running setup for profiles: {0}'
+        GuiRunningHint            = '    (if Claude has to be copied, the window will stop responding for a few minutes)'
+        GuiAddPrompt              = 'Enter the name of the new instance:'
+        GuiAddTitle               = 'Add Profile'
+        GuiAddDefault             = 'Work'
+        GuiAdding                 = '==> Adding profile "{0}". Configuring...'
+        GuiPickProfile            = 'Please select a profile from the list to edit its note/email.'
+        GuiNotePrompt             = 'Enter the note/email for "{0}":'
+        GuiNoteTitle              = 'Edit Note/Email'
+        GuiNoteUpdated            = 'Note for "{0}" updated to: "{1}".'
+        GuiRebuilding             = '==> Rebuilding desktop shortcuts with the new names...'
+        GuiStartHealth            = 'Starting health check...'
+        GuiStartCache             = 'Starting cache cleanup...'
+        GuiZipFilter              = 'ZIP files (*.zip)|*.zip'
+        GuiSaveBackupTitle        = 'Save Profile Backup'
+        GuiOpenBackupTitle        = 'Select Backup to Restore'
+        GuiConfirmRevert          = 'Are you sure you want to revert and delete the shortcuts and data of the extra profiles?'
+        GuiConfirmRevertTitle     = 'Confirm Revert'
+        GuiReverting              = '==> Reverting the extra profile setup...'
+        GuiDeepCleanTitle         = 'Deep cleanup'
+        GuiPermTitle              = 'WindowsApps permissions'
+        GuiPermAsk                = 'Grant read permissions to the Administrators group on {0}?'
+        MsgOneProfileOnly         = 'Only one profile was given: no additional instance will be created.'
+        MsgNoAppx                 = 'Get-AppxPackage is not available in this edition of PowerShell.'
+        MsgNoAppx2                = 'A Microsoft Store installation cannot be detected from here.'
+        MsgNoAppx3                = 'Run again with Windows PowerShell 5.1:'
+        MsgShortcutExists         = '''{0}.lnk'' already existed on the Desktop: overwriting.'
+        MsgNoAppx4                = '  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1'
+        MsgReuseCopy              = 'The existing copy will be reused.'
+        MsgDeletingOldCopy        = 'Deleting previous copy...'
+        MsgCopying                = 'Copying {0}'
+        MsgCopyingTo              = '     ->  {0}'
+        MsgBadJsonKeep            = 'Could not read {0} as JSON: leaving it as is.'
+        MsgServerKept             = '''{0}'' already exists in {1} and is kept (use -Force to replace it).'
+        MsgNoSrcConfig            = 'There is no claude_desktop_config.json in {0}; MCPs will not be copied.'
+        MsgBadSrcJson             = 'Could not read {0} as JSON; MCPs will not be copied.'
+        MsgNoMcpsToCopy           = 'Your current profile has no MCP servers configured: there is nothing to copy.'
+        MsgMcpsCopied             = 'MCPs copied ({0}) -> {1}'
+        StepDeletingShortcuts     = 'Deleting shortcuts...'
+        MsgDeleted                = 'Deleted: {0}'
+        StepDeletingProfileData   = 'Deleting data folders of the extra profiles...'
+        MsgNoExtraData            = 'There are no extra profile folders to delete.'
+        MsgNoConfirmHost          = 'Confirmation cannot be requested in this host.'
+        MsgAddForce               = 'Add -Force to delete the data folders without asking.'
+        MsgDataKept               = 'Data folders kept.'
+        StepRemovingShared        = 'Removing the shared memory servers from the main profile...'
+        MsgRemoved                = 'Removed: {0}'
+        MsgNoSharedToRemove       = 'There were no shared servers to remove.'
+        StepDeletingLauncher      = 'Deleting launcher and icons...'
+        MsgDoesNotExist           = '{0} does not exist.'
+        StepDeletingPortable      = 'Deleting the portable copy...'
+        MsgUntouchedMain          = 'Untouched: {0} (your original profile).'
+        MsgUntouchedShared        = 'Untouched: {0} (shared memory). Delete it by hand if you no longer want it.'
+        MsgNoteUpdated            = 'Note for ''{0}'' updated.'
+        MsgCfgUpdateFailed        = 'Could not update config.json: {0}'
+        HcTitle                   = '  System Health Check'
+        HcMainExe                 = 'Main executable: {0}'
+        MsgInstallMode            = 'Installation mode: {0}'
+        MsgInstalledVer           = 'Installed version: {0}'
+        HcNoInstall               = 'No active Claude Desktop installation was detected.'
+        HcLauncherDir             = 'Launcher and icon folder: {0} [OK]'
+        HcNoLauncherDir           = 'The launcher folder does not exist: {0}'
+        HcProfileStates           = 'Status of configured profiles:'
+        HcNotCreated              = 'Not created'
+        HcLnkOk                   = 'Shortcut [OK]'
+        HcLnkMissing              = 'Shortcut [MISSING]'
+        HcProfileLine             = '{0}{1} -> {2} | {3}'
+        HcNoProfiles              = 'There are no profiles configured right now.'
+        HcOrphans                 = 'Orphan profiles (they exist on disk but not in config.json):'
+        PairArrow                 = '{0} -> {1}'
+        HcOrphanHint1             = 'Run the setup again including them in -Profiles'
+        HcOrphanHint2             = 'to re-adopt them, or delete the folder by hand if you no longer use them.'
+        HcSharedTitle             = 'Shared memory across instances:'
+        HcSharedOn                = 'Enabled -> {0} ({1} KB of memory, {2} .md document(s))'
+        HcSharedNoDir             = 'Enabled in config.json but the folder does not exist: {0}'
+        HcSharedConnected         = '  {0} -> connected'
+        HcSharedMissing           = '  {0} -> WITHOUT the shared servers'
+        HcNoNpx                   = '  npx is not on PATH: the shared servers will not start.'
+        HcSharedOff               = 'Disabled. Enable it with -SharedMemory or from the interface.'
+        HcRunningProcs            = 'Claude processes running: {0}'
+        MsgOldBinaryDeleted       = 'Old binary deleted: {0}\claude-code\{1}'
+        CacheTitle                = '--- Cache and Temporary File Cleaner ---'
+        MsgProcsRunning           = 'There are {0} Claude process(es) running.'
+        MsgCloseBeforeClean       = 'Close all Claude windows before cleaning the cache.'
+        MsgNoProfilesToClean      = 'No profile folders were found to clean.'
+        MsgCleanDone              = 'Cleanup complete. Disk space freed: {0} MB'
+        MsgHeavyPending           = 'There are also {0} MB in the Cowork VM image ({1}).'
+        MsgHeavyHint              = 'It can be deleted, but the app downloads it again in full the next time you use Cowork.'
+        BackupTitle               = '--- Back Up Profiles (.zip) ---'
+        MsgCloseBeforeBackup      = 'Close all Claude windows before backing up:'
+        MsgCloseBeforeBackup2     = 'with the app open the session is locked and does not get copied.'
+        MsgBackupHasTokens        = 'The backup includes the session tokens of every account.'
+        MsgBackupKeepSafe         = 'Keep the .zip somewhere safe: it is equivalent to your credentials.'
+        MsgFilesInUse             = 'Some files in "{0}" were in use and were skipped.'
+        MsgIncluded               = 'Included: {0}'
+        MsgBackupOk               = 'Backup created successfully:'
+        MsgBackupPath             = '{0} ({1} MB)'
+        MsgBackupIncomplete       = '{0} profile(s) were left incomplete because of files in use.'
+        MsgBackupError            = 'Error creating the backup: {0}'
+        MsgFileNotFound           = 'File not found: {0}'
+        MsgCloseBeforeRestore     = 'Close all Claude windows before restoring.'
+        MsgLauncherRestored       = 'Launcher configuration restored.'
+        MsgProfileRestored        = 'Profile restored: {0}'
+        MsgRestoreOk              = 'Restore completed successfully.'
+        MsgRestoreHint            = 'It is recommended to run the setup to refresh the shortcuts.'
+        MsgRestoreError           = 'Error restoring the backup: {0}'
+        StepSearchingInstall      = 'Searching for the Claude Desktop installation...'
+        MsgNotFound               = 'Claude Desktop was not found on this computer.'
+        MsgPathsChecked           = 'Paths checked: %LOCALAPPDATA%\AnthropicClaude, %ProgramFiles%\Claude and MSIX packages.'
+        MsgInstallClaude          = 'Install Claude Desktop and run this script again.'
+        MsgFolder                 = 'Folder: {0}'
+        StepMsixDetected          = 'MSIX installation detected (Microsoft Store).'
+        MsgMsixNote1              = 'Windows does not allow launching the .exe from WindowsApps with parameters,'
+        MsgMsixNote2              = 'so a portable copy has to be made in a normal folder.'
+        MsgPortableUpToDate       = 'Portable copy up to date (version {0}). There is nothing to update.'
+        MsgNoPortableYet          = 'There is no portable copy yet.'
+        MsgForceRecopy            = '-Force was requested: the copy is remade.'
+        MsgClaudeUpdated          = 'Claude was updated: {0} -> {1}. Updating the copy...'
+        MsgPortableIncomplete     = 'The portable copy is incomplete or moved: it will be remade.'
+        MsgPortableNoStamp        = 'There is a portable copy with no version stamp: it will be remade so it can be tracked.'
+        MsgPortableBusy           = 'There are {0} Claude process(es) running from {1}.'
+        MsgCannotReplace          = 'The copy cannot be replaced while they are open.'
+        MsgCloseAndRetry          = 'Close those Claude windows and try again.'
+        MsgKeepUsingCurrent       = 'For now the current copy keeps being used.'
+        MsgUpdateFailedBusy       = 'The update failed: Claude is open from the portable copy.'
+        MsgCloseAllAndRetry       = 'Close all Claude windows and try again.'
+        MsgCopyFailedPerms        = 'The copy failed because of the restrictive WindowsApps permissions.'
+        MsgPermsFix1              = 'The fix is to grant read permission to the Administrators group'
+        MsgPermsFix2              = 'on that folder.'
+        MsgPermsAsk               = 'Grant read to the Administrators group on {0}?'
+        MsgPermsCaption           = 'WindowsApps permissions'
+        MsgNonInteractive         = 'Non-interactive run: use -GrantWindowsAppsRead to authorize it.'
+        MsgCancelled              = 'Cancelled.'
+        MsgNeedsAdmin             = 'This step needs Administrator permissions.'
+        MsgRunAsAdmin             = 'Close this window and run with "Run as administrator".'
+        MsgTakingOwnership        = 'Taking ownership of the package folder...'
+        MsgGrantingRead           = 'Granting read to Administrators...'
+        MsgPortableReady          = 'Portable copy ready (version {0}): {1}'
+        MsgNoPortableNeeded       = 'No portable copy is needed: the executable can be launched directly.'
+        MsgVersionedFolder        = 'The executable is inside a folder with a version number.'
+        StepPreparingShared       = 'Preparing the shared memory across instances...'
+        MsgNoNpxSetup             = 'npx was not found on PATH: the shared MCP servers need Node.js.'
+        MsgNodeOutsidePath        = 'Node seems to be at {0} but it is not on PATH.'
+        MsgAddToPath              = 'Add that folder to PATH and run again with -SharedMemory.'
+        MsgInstallNode            = 'Install Node.js (https://nodejs.org) and run again with -SharedMemory.'
+        MsgRestContinues          = 'The rest of the setup continues normally.'
+        MsgSharedFolder           = 'Shared folder: {0}'
+        MsgNpxAt                  = 'npx: {0}'
+        StepGeneratingIcons       = 'Generating per-profile colored icons...'
+        MsgIconFailed             = 'Could not generate the icon for ''{0}'': {1}'
+        StepInstallingLauncher    = 'Installing launcher (checks for updates before opening)...'
+        StepCreatingShortcuts     = 'Creating desktop shortcuts...'
+        MsgWhatIfRemoveOld        = 'Whatif: the previous shortcut would be deleted: {0}'
+        MsgRemovedOldLnk          = 'Previous shortcut removed: {0}'
+        MsgSharedInProfile        = 'Shared memory in "{0}" ({1}).'
+        MsgProfileDone            = '{0}  [{1}]'
+        MsgNonInteractiveDefaults = 'Non-interactive host: the default profiles are used.'
+        DescStore                 = 'Claude Desktop - profile "{0}"{1} (Store package)'
+        DescExe                   = 'Claude Desktop - profile "{0}"{1} at {2}'
+        DescLauncher              = 'Claude Desktop - profile "{0}"{1} (checks for updates when opening)'
+        ErrEmptyProfiles          = 'The profile list is empty.'
+        ErrEmptyName              = 'There is an empty profile name in -Profiles.'
+        ErrBadChars               = 'The profile name ''{0}'' contains characters that are not valid for a file or folder.'
+        ErrBadEdges               = 'The profile name ''{0}'' cannot start/end with a space or end with a dot.'
+        ErrDupNames               = 'There are duplicate profile names: {0}'
+        ErrRobocopy               = 'robocopy failed (code {0}). Probably because of WindowsApps permissions.'
+        ErrRobocopyProfile        = 'robocopy failed copying {0} (code {1}).'
+        ErrNoClaudeExe            = 'claude.exe was not found inside {0}'
+        ErrNoTargetExe            = 'Could not determine the Claude Desktop executable.'
+        MenuProfileLine           = '  [{0}] {1}{2}'
+        GuiDeepCleanMsg           = '{0} MB remain in the Cowork VM image.`n`nIt can be deleted, but the app will download it again in full the next time you use Cowork.`n`nDelete it anyway?'
+        YesShort                  = 'YES'
+        ColorAzul                 = 'blue'
+        ColorVerde                = 'green'
+        ColorMorado               = 'purple'
+        ColorCian                 = 'cyan'
+        ColorRosa                 = 'pink'
+        ColorAzabache             = 'jet'
+        ColorOliva                = 'olive'
+        ViaStore                  = 'Store'
+        ViaExe                    = 'Exe'
+        ViaLauncher               = 'Launcher'
     }
 }
-
 function Get-I18nStr {
     param(
         [Parameter(Mandatory)][string]$Key,
@@ -221,6 +596,10 @@ function Get-I18nStr {
     if (-not $script:I18n.ContainsKey($lang)) { $lang = 'en' }
     $str = $script:I18n[$lang][$Key]
     if (-not $str) { $str = $script:I18n['en'][$Key] }
+    # La tabla usa comillas simples (asi el texto no se interpola por accidente),
+    # y ahi `n es backtick+n literal. Se convierte aqui a salto de linea real
+    # para los mensajes de varias lineas de los MessageBox.
+    if ($str -like '*`n*') { $str = $str.Replace('`n', [Environment]::NewLine) }
     if ($FormatArgs -and $FormatArgs.Count -gt 0) {
         return [string]($str -f $FormatArgs)
     }
@@ -269,13 +648,13 @@ $script:HomeDir = Join-Path $env:APPDATA 'ClaudeMulti'
 # Ojo: nada de coral/naranja. El icono de Claude ya es coral y la insignia
 # se volveria invisible sobre el.
 $script:Palette = @(
-    @{ Nombre = 'azul';   Rgb = @( 37, 118, 208) },
-    @{ Nombre = 'verde';  Rgb = @( 34, 150,  94) },
-    @{ Nombre = 'morado'; Rgb = @(126,  78, 214) },
-    @{ Nombre = 'cian';   Rgb = @( 20, 150, 176) },
-    @{ Nombre = 'rosa';   Rgb = @(209,  56, 130) },
-    @{ Nombre = 'azabache'; Rgb = @( 45,  55,  72) },
-    @{ Nombre = 'oliva';  Rgb = @(107, 142,  35) }
+    @{ Clave = 'ColorAzul';     Rgb = @( 37, 118, 208) },
+    @{ Clave = 'ColorVerde';    Rgb = @( 34, 150,  94) },
+    @{ Clave = 'ColorMorado';   Rgb = @(126,  78, 214) },
+    @{ Clave = 'ColorCian';     Rgb = @( 20, 150, 176) },
+    @{ Clave = 'ColorRosa';     Rgb = @(209,  56, 130) },
+    @{ Clave = 'ColorAzabache'; Rgb = @( 45,  55,  72) },
+    @{ Clave = 'ColorOliva';    Rgb = @(107, 142,  35) }
 )
 
 function Get-ProfileColor {
@@ -460,7 +839,7 @@ function New-ProfileIcon {
     foreach ($f in $frames) { $f.Dispose() }
     if ($base) { $base.Dispose() }
 
-    return [pscustomobject]@{ Path = $out; Color = $color.Nombre }
+    return [pscustomobject]@{ Path = $out; Color = (Get-I18nStr $color.Clave) }
 }
 
 function Get-ExeVersion {
@@ -524,30 +903,30 @@ function Assert-ProfileNames {
     param([string[]]$Names)
 
     if (-not $Names -or $Names.Count -eq 0) {
-        throw 'La lista de perfiles esta vacia.'
+        throw (Get-I18nStr 'ErrEmptyProfiles')
     }
 
     $bad = [IO.Path]::GetInvalidFileNameChars()
     foreach ($n in $Names) {
         if ([string]::IsNullOrWhiteSpace($n)) {
-            throw 'Hay un nombre de perfil vacio en -Profiles.'
+            throw (Get-I18nStr 'ErrEmptyName')
         }
         if ($n.IndexOfAny($bad) -ge 0) {
-            throw "El nombre de perfil '$n' contiene caracteres no validos para un archivo o carpeta."
+            throw (Get-I18nStr 'ErrBadChars' @($n))
         }
         if ($n -ne $n.Trim() -or $n.EndsWith('.')) {
-            throw "El nombre de perfil '$n' no puede empezar/terminar en espacio ni terminar en punto."
+            throw (Get-I18nStr 'ErrBadEdges' @($n))
         }
     }
 
     $dupes = $Names | Group-Object -Property { $_.ToLowerInvariant() } |
              Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Group[0] }
     if ($dupes) {
-        throw "Hay nombres de perfil repetidos: $($dupes -join ', ')"
+        throw (Get-I18nStr 'ErrDupNames' @($dupes -join ', '))
     }
 
     if ($Names.Count -lt 2 -and -not $Revert) {
-        Write-Warn 'Solo se indico un perfil: no se crea ninguna instancia adicional.'
+        Write-Warn (Get-I18nStr 'MsgOneProfileOnly')
     }
 }
 
@@ -589,10 +968,10 @@ function Get-ClaudeInstall {
 
     # --- 2. Instalacion MSIX (Microsoft Store) ------------------------------
     if (-not (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue)) {
-        Write-Warn 'Get-AppxPackage no esta disponible en esta edicion de PowerShell.'
-        Write-Note 'No se puede detectar una instalacion de Microsoft Store desde aqui.'
-        Write-Note 'Vuelve a ejecutar con Windows PowerShell 5.1:'
-        Write-Note '  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1'
+        Write-Warn (Get-I18nStr 'MsgNoAppx')
+        Write-Note (Get-I18nStr 'MsgNoAppx2')
+        Write-Note (Get-I18nStr 'MsgNoAppx3')
+        Write-Note (Get-I18nStr 'MsgNoAppx4')
         return $null
     }
 
@@ -637,7 +1016,7 @@ function New-ClaudeShortcut {
     $path    = Join-Path $desktop "$Name.lnk"
 
     if (Test-Path -LiteralPath $path) {
-        Write-Warn "Ya existia '$Name.lnk' en el Escritorio: se sobrescribe."
+        Write-Warn (Get-I18nStr 'MsgShortcutExists' @($Name))
     }
 
     if (-not $PSCmdlet.ShouldProcess($path, 'Crear acceso directo')) { return $path }
@@ -670,20 +1049,20 @@ function Copy-ToPortable {
     )
 
     if ((Test-Path $Destination) -and -not $Overwrite) {
-        Write-Note 'Se reutilizara la copia existente.'
+        Write-Note (Get-I18nStr 'MsgReuseCopy')
         return
     }
     if (Test-Path $Destination) {
         if ($PSCmdlet.ShouldProcess($Destination, 'Borrar copia portable anterior')) {
-            Write-Note 'Borrando copia anterior...'
+            Write-Note (Get-I18nStr 'MsgDeletingOldCopy')
             Remove-Item -LiteralPath $Destination -Recurse -Force
         }
     }
 
     if (-not $PSCmdlet.ShouldProcess($Destination, "Copiar Claude Desktop desde $Source")) { return }
 
-    Write-Note "Copiando $Source"
-    Write-Note "     ->  $Destination"
+    Write-Note (Get-I18nStr 'MsgCopying' @($Source))
+    Write-Note (Get-I18nStr 'MsgCopyingTo' @($Destination))
     # /XJ: no seguir junctions ni enlaces duros, que los paquetes MSIX si usan.
     $null = robocopy $Source $Destination /E /XJ /COPY:DAT /DCOPY:DA /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
     $rc = $LASTEXITCODE
@@ -691,7 +1070,7 @@ function Copy-ToPortable {
     # que el codigo de salida del script no herede un "1" que parece error.
     $global:LASTEXITCODE = 0
     if ($rc -ge 8) {
-        throw "robocopy fallo (codigo $rc). Probablemente por permisos de WindowsApps."
+        throw (Get-I18nStr 'ErrRobocopy' @($rc))
     }
 }
 
@@ -715,7 +1094,7 @@ function Merge-McpServers {
     if (Test-Path -LiteralPath $dst) {
         try { $out = Get-Content -LiteralPath $dst -Raw | ConvertFrom-Json }
         catch {
-            Write-Warn "No se pudo leer $dst como JSON: se deja como esta."
+            Write-Warn (Get-I18nStr 'MsgBadJsonKeep' @($dst))
             return @()
         }
     }
@@ -732,7 +1111,7 @@ function Merge-McpServers {
     $written = @()
     foreach ($key in $Servers.Keys) {
         if (($existing -contains $key) -and -not $Overwrite) {
-            Write-Note "'$key' ya existe en ${DestinationDir} y se conserva (usa -Force para reemplazarlo)."
+            Write-Note (Get-I18nStr 'MsgServerKept' @($key, $DestinationDir))
             continue
         }
         $merged[$key] = $Servers[$key]
@@ -793,7 +1172,7 @@ function Copy-McpConfig {
     $srcDir = Join-Path $env:APPDATA 'Claude'
     $src    = Join-Path $srcDir 'claude_desktop_config.json'
     if (-not (Test-Path -LiteralPath $src)) {
-        Write-Warn "No hay claude_desktop_config.json en $srcDir; no se copian MCPs."
+        Write-Warn (Get-I18nStr 'MsgNoSrcConfig' @($srcDir))
         return
     }
 
@@ -804,7 +1183,7 @@ function Copy-McpConfig {
         $srcJson = Get-Content -LiteralPath $src -Raw | ConvertFrom-Json
     }
     catch {
-        Write-Warn "No se pudo leer $src como JSON; no se copian MCPs."
+        Write-Warn (Get-I18nStr 'MsgBadSrcJson' @($src))
         return
     }
 
@@ -814,13 +1193,13 @@ function Copy-McpConfig {
     }
 
     if ($servers.Count -eq 0) {
-        Write-Note 'Tu perfil actual no tiene MCP servers configurados: no hay nada que copiar.'
+        Write-Note (Get-I18nStr 'MsgNoMcpsToCopy')
         return
     }
 
     $written = @(Merge-McpServers -DestinationDir $DestinationDir -Servers $servers -Overwrite:$Overwrite)
     if ($written.Count -gt 0) {
-        Write-Note "MCPs copiados ($($written -join ', ')) -> $DestinationDir"
+        Write-Note (Get-I18nStr 'MsgMcpsCopied' @($($written -join ', '), $DestinationDir))
     }
 }
 
@@ -1099,11 +1478,11 @@ function Get-ProfileLabel {
     param([string]$Name, [int]$Index)
     $note = Get-ProfileNote -Name $Name
     if ($Index -eq 0) {
-        if ($note) { return "Claude - $Name ($note) (perfil actual)" }
-        return "Claude - $Name (perfil actual)"
+        if ($note) { return (Get-I18nStr 'ProfileLabelOriginalNote' @($Name, $note)) }
+        return (Get-I18nStr 'ProfileLabelOriginal' @($Name))
     }
-    if ($note) { return "Claude - $Name ($note)" }
-    return "Claude - $Name"
+    if ($note) { return (Get-I18nStr 'ProfileLabelExtraNote' @($Name, $note)) }
+    return (Get-I18nStr 'ProfileLabelExtra' @($Name))
 }
 
 # Accesos directos que pertenecen a un perfil.
@@ -1115,7 +1494,13 @@ function Get-ProfileLabel {
 #
 # Se listan todos los "Claude - *.lnk", se descompone el nombre en perfil+nota
 # y se compara el PERFIL de forma exacta.
-$script:ShortcutRegex = '^Claude - (?<name>.+?)(?: \((?<note>[^)]*)\))?(?: \(perfil actual\))?$'
+# El sufijo va en los DOS idiomas a proposito: si alguien cambia -Language,
+# los accesos directos creados antes tienen que seguir reconociendose para
+# poder reemplazarlos, o el Escritorio se llena de huerfanos.
+$script:CurrentProfileSuffixes = @('perfil actual', 'current profile')
+$script:ShortcutRegex = '^Claude - (?<name>.+?)(?: \((?<note>[^)]*)\))?(?: \((?:' +
+                        (($script:CurrentProfileSuffixes | ForEach-Object { [regex]::Escape($_) }) -join '|') +
+                        ')\))?$'
 
 function Get-ProfileShortcutPaths {
     param([Parameter(Mandatory)][string]$Name)
@@ -1137,20 +1522,20 @@ function Invoke-Revert {
         [switch]$SkipConfirm
     )
 
-    Write-Step 'Borrando accesos directos...'
+    Write-Step (Get-I18nStr 'StepDeletingShortcuts')
     foreach ($n in $Names) {
         foreach ($lnk in (Get-ProfileShortcutPaths -Name $n)) {
             if (Test-Path -LiteralPath $lnk) {
                 if ($PSCmdlet.ShouldProcess($lnk, 'Eliminar acceso directo')) {
                     Remove-Item -LiteralPath $lnk -Force
-                    Write-Ok "Borrado: $(Split-Path -Leaf $lnk)"
+                    Write-Ok (Get-I18nStr 'MsgDeleted' @($(Split-Path -Leaf $lnk)))
                 }
             }
         }
     }
 
     # El primer perfil usa %APPDATA%\Claude, que NUNCA se toca.
-    Write-Step 'Borrando carpetas de datos de los perfiles extra...'
+    Write-Step (Get-I18nStr 'StepDeletingProfileData')
     $dataDirs = @()
     foreach ($n in ($Names | Select-Object -Skip 1)) {
         $d = Join-Path $env:APPDATA "Claude-$n"
@@ -1158,7 +1543,7 @@ function Invoke-Revert {
     }
 
     if ($dataDirs.Count -eq 0) {
-        Write-Note 'No hay carpetas de perfiles extra que borrar.'
+        Write-Note (Get-I18nStr 'MsgNoExtraData')
     }
     else {
         $go = $SkipConfirm
@@ -1171,8 +1556,8 @@ function Invoke-Revert {
             }
             catch {
                 # Host no interactivo: no se puede confirmar un borrado de datos.
-                Write-Warn 'No se puede pedir confirmacion en este host.'
-                Write-Note 'Anade -Force para borrar las carpetas de datos sin preguntar.'
+                Write-Warn (Get-I18nStr 'MsgNoConfirmHost')
+                Write-Note (Get-I18nStr 'MsgAddForce')
                 $go = $false
             }
         }
@@ -1180,12 +1565,12 @@ function Invoke-Revert {
             foreach ($d in $dataDirs) {
                 if ($PSCmdlet.ShouldProcess($d, 'Eliminar carpeta de datos del perfil')) {
                     Remove-Item -LiteralPath $d -Recurse -Force
-                    Write-Ok "Borrado: $d"
+                    Write-Ok (Get-I18nStr 'MsgDeleted' @($d))
                 }
             }
         }
         else {
-            Write-Note 'Carpetas de datos conservadas.'
+            Write-Note (Get-I18nStr 'MsgDataKept')
         }
     }
 
@@ -1201,39 +1586,39 @@ function Invoke-Revert {
         } catch { }
     }
     if ($sharedDirSaved) {
-        Write-Step 'Quitando los servidores de memoria compartida del perfil principal...'
+        Write-Step (Get-I18nStr 'StepRemovingShared')
         $gone = @(Remove-McpServers -DestinationDir (Join-Path $env:APPDATA 'Claude') `
                     -Names @('shared-memory', 'shared-files'))
-        if ($gone.Count -gt 0) { Write-Ok "Quitados: $($gone -join ', ')" }
-        else { Write-Note 'No habia servidores compartidos que quitar.' }
+        if ($gone.Count -gt 0) { Write-Ok (Get-I18nStr 'MsgRemoved' @($gone -join ', ')) }
+        else { Write-Note (Get-I18nStr 'MsgNoSharedToRemove') }
     }
 
-    Write-Step 'Borrando lanzador e iconos...'
+    Write-Step (Get-I18nStr 'StepDeletingLauncher')
     if (Test-Path -LiteralPath $script:HomeDir) {
         if ($PSCmdlet.ShouldProcess($script:HomeDir, 'Eliminar lanzador, iconos y configuracion')) {
             Remove-Item -LiteralPath $script:HomeDir -Recurse -Force
-            Write-Ok "Borrado: $script:HomeDir"
+            Write-Ok (Get-I18nStr 'MsgDeleted' @($script:HomeDir))
         }
     }
     else {
-        Write-Note "No existe $script:HomeDir."
+        Write-Note (Get-I18nStr 'MsgDoesNotExist' @($script:HomeDir))
     }
 
-    Write-Step 'Borrando la copia portable...'
+    Write-Step (Get-I18nStr 'StepDeletingPortable')
     if (Test-Path -LiteralPath $PortablePath) {
         if ($PSCmdlet.ShouldProcess($PortablePath, 'Eliminar copia portable')) {
             Remove-Item -LiteralPath $PortablePath -Recurse -Force
-            Write-Ok "Borrado: $PortablePath"
+            Write-Ok (Get-I18nStr 'MsgDeleted' @($PortablePath))
         }
     }
     else {
-        Write-Note "No existe $PortablePath."
+        Write-Note (Get-I18nStr 'MsgDoesNotExist' @($PortablePath))
     }
 
     Write-Host ''
-    Write-Ok "Intacto: $(Join-Path $env:APPDATA 'Claude') (tu perfil original)."
+    Write-Ok (Get-I18nStr 'MsgUntouchedMain' @($(Join-Path $env:APPDATA 'Claude')))
     if ($sharedDirSaved -and (Test-Path -LiteralPath $sharedDirSaved)) {
-        Write-Ok "Intacto: $sharedDirSaved (memoria compartida). Borrala a mano si ya no la quieres."
+        Write-Ok (Get-I18nStr 'MsgUntouchedShared' @($sharedDirSaved))
     }
 }
 
@@ -1277,7 +1662,7 @@ function Get-ProfileNote {
         $m = [regex]::Match([IO.Path]::GetFileNameWithoutExtension($lnk), $script:ShortcutRegex)
         if ($m.Success -and $m.Groups['note'].Success) {
             $note = $m.Groups['note'].Value
-            if ($note -and $note -ne 'perfil actual') { return $note }
+            if ($note -and ($script:CurrentProfileSuffixes -notcontains $note)) { return $note }
         }
     }
     return $null
@@ -1286,22 +1671,22 @@ function Get-ProfileNote {
 function Edit-ProfileNotes {
     $profs = Get-ConfiguredProfileObjects
     if ($profs.Count -eq 0) {
-        Write-Warn (Get-I18nStr 'NotFound')
+        Write-Warn (Get-I18nStr 'HcNoProfiles')
         return
     }
 
     Write-Host ''
-    Write-Host '--- Asignar Nota / Correo a Perfil ---' -ForegroundColor Cyan
+    Write-Host (Get-I18nStr 'EditNotesTitle') -ForegroundColor Cyan
     for ($i = 0; $i -lt $profs.Count; $i++) {
         $noteStr = $(if ($profs[$i].note) { " ($($profs[$i].note))" } else { '' })
-        Write-Host "  [$($i+1)] $($profs[$i].name)$noteStr"
+        Write-Host (Get-I18nStr 'MenuProfileLine' @(($i+1), $profs[$i].name, $noteStr))
     }
     Write-Host ''
-    $sel = Read-Host 'Selecciona el numero de perfil a editar (vacio para cancelar)'
+    $sel = Read-Host (Get-I18nStr 'AskProfileToEdit')
     [int]$idx = 0
     if ([int]::TryParse($sel, [ref]$idx) -and $idx -ge 1 -and $idx -le $profs.Count) {
         $targetProf = $profs[$idx - 1]
-        $newNote = Read-Host "Ingresa la nota/correo para '$($targetProf.name)' (vacio para borrar)"
+        $newNote = Read-Host (Get-I18nStr 'AskNoteFor' @($targetProf.name))
         if ($targetProf.PSObject.Properties.Name -contains 'note') {
             $targetProf.note = $newNote.Trim()
         } else {
@@ -1315,9 +1700,9 @@ function Edit-ProfileNotes {
                 $cfg.profiles = $profs
                 $json = $cfg | ConvertTo-Json -Depth 8
                 [IO.File]::WriteAllText($cfgFile, $json, (New-Object Text.UTF8Encoding($false)))
-                Write-Ok "Nota de '$($targetProf.name)' actualizada."
+                Write-Ok (Get-I18nStr 'MsgNoteUpdated' @($($targetProf.name)))
             } catch {
-                Write-Warn "No se pudo actualizar config.json: $($_.Exception.Message)"
+                Write-Warn (Get-I18nStr 'MsgCfgUpdateFailed' @($($_.Exception.Message)))
             }
         }
     }
@@ -1326,27 +1711,27 @@ function Edit-ProfileNotes {
 function Invoke-HealthCheck {
     Write-Host ''
     Write-Host '=============================================================' -ForegroundColor White
-    Write-Host '  Diagnostico de Salud del Sistema (Health Check)' -ForegroundColor White
+    Write-Host (Get-I18nStr 'HcTitle') -ForegroundColor White
     Write-Host '=============================================================' -ForegroundColor White
 
     $install = Get-ClaudeInstall
     if ($install) {
-        Write-Ok "Ejecutable principal: $($install.Exe)"
-        Write-Ok "Modo de instalacion: $($install.Mode)"
-        if ($install.Version) { Write-Ok "Version instalada: $($install.Version)" }
+        Write-Ok (Get-I18nStr 'HcMainExe' @($($install.Exe)))
+        Write-Ok (Get-I18nStr 'MsgInstallMode' @($($install.Mode)))
+        if ($install.Version) { Write-Ok (Get-I18nStr 'MsgInstalledVer' @($install.Version)) }
     } else {
-        Write-Err 'No se detecto instalacion activa de Claude Desktop.'
+        Write-Err (Get-I18nStr 'HcNoInstall')
     }
 
     if (Test-Path -LiteralPath $script:HomeDir) {
-        Write-Ok "Carpeta de lanzadores e iconos: $script:HomeDir [OK]"
+        Write-Ok (Get-I18nStr 'HcLauncherDir' @($script:HomeDir))
     } else {
-        Write-Warn "No existe la carpeta de lanzadores: $script:HomeDir"
+        Write-Warn (Get-I18nStr 'HcNoLauncherDir' @($script:HomeDir))
     }
 
     $profs = Get-ConfiguredProfileObjects
     if ($profs.Count -gt 0) {
-        Write-Host "`nEstado de perfiles configurados:" -ForegroundColor Cyan
+        Write-Host "`n$(Get-I18nStr 'HcProfileStates')" -ForegroundColor Cyan
         foreach ($p in $profs) {
             $n = $p.name
             $dataDir = $p.dataDir
@@ -1363,17 +1748,17 @@ function Invoke-HealthCheck {
             $hasLnk = @(Get-ProfileShortcutPaths -Name $n).Count -gt 0
 
             $noteStr = $(if ($p.note) { " ($($p.note))" } else { '' })
-            $statusStr = $(if ($exists) { "$sizeMB MB" } else { 'No creada' })
-            $lnkStr    = $(if ($hasLnk) { 'Acceso directo [OK]' } else { 'Acceso directo [FALTA]' })
+            $statusStr = $(if ($exists) { "$sizeMB MB" } else { Get-I18nStr 'HcNotCreated' })
+            $lnkStr    = $(if ($hasLnk) { Get-I18nStr 'HcLnkOk' } else { Get-I18nStr 'HcLnkMissing' })
 
             if ($exists -and $hasLnk) {
-                Write-Ok "$n$noteStr -> $statusStr | $lnkStr"
+                Write-Ok (Get-I18nStr 'HcProfileLine' @($n, $noteStr, $statusStr, $lnkStr))
             } else {
-                Write-Warn "$n$noteStr -> $statusStr | $lnkStr"
+                Write-Warn (Get-I18nStr 'HcProfileLine' @($n, $noteStr, $statusStr, $lnkStr))
             }
         }
     } else {
-        Write-Note 'No hay perfiles configurados actualmente.'
+        Write-Note (Get-I18nStr 'HcNoProfiles')
     }
 
     # config.json es la unica lista de perfiles, pero una ejecucion con menos
@@ -1383,16 +1768,16 @@ function Invoke-HealthCheck {
     $orphans = @(Get-ChildItem -LiteralPath $env:APPDATA -Filter 'Claude-*' -Directory -ErrorAction SilentlyContinue |
                  Where-Object { $known -notcontains $_.Name })
     if ($orphans.Count -gt 0) {
-        Write-Host "`nPerfiles huerfanos (existen en disco pero no en config.json):" -ForegroundColor Yellow
+        Write-Host "`n$(Get-I18nStr 'HcOrphans')" -ForegroundColor Yellow
         foreach ($o in $orphans) {
             $n = $o.Name -replace '^Claude-', ''
-            Write-Warn "$n -> $($o.FullName)"
+            Write-Warn (Get-I18nStr 'PairArrow' @($n, $o.FullName))
         }
-        Write-Note 'Vuelve a ejecutar la configuracion incluyendolos en -Profiles'
-        Write-Note 'para readoptarlos, o borra la carpeta a mano si ya no los usas.'
+        Write-Note (Get-I18nStr 'HcOrphanHint1')
+        Write-Note (Get-I18nStr 'HcOrphanHint2')
     }
 
-    Write-Host "`nMemoria compartida entre instancias:" -ForegroundColor Cyan
+    Write-Host "`n$(Get-I18nStr 'HcSharedTitle')" -ForegroundColor Cyan
     $cfgFile   = Join-Path $script:HomeDir 'config.json'
     $sharedCfg = $null
     if (Test-Path -LiteralPath $cfgFile) {
@@ -1404,10 +1789,10 @@ function Invoke-HealthCheck {
             $memFile = Join-Path $sd 'memory.json'
             $memKB   = $(if (Test-Path -LiteralPath $memFile) { [math]::Round((Get-Item -LiteralPath $memFile).Length / 1KB, 1) } else { 0 })
             $docs    = @(Get-ChildItem -LiteralPath $sd -Filter '*.md' -File -ErrorAction SilentlyContinue).Count
-            Write-Ok "Activa -> $sd ($memKB KB de memoria, $docs documento(s) .md)"
+            Write-Ok (Get-I18nStr 'HcSharedOn' @($sd, $memKB, $docs))
         }
         else {
-            Write-Warn "Activa en config.json pero la carpeta no existe: $sd"
+            Write-Warn (Get-I18nStr 'HcSharedNoDir' @($sd))
         }
         # Se comprueba perfil por perfil: alguien pudo quitar el server a mano.
         foreach ($p in $profs) {
@@ -1419,18 +1804,19 @@ function Invoke-HealthCheck {
                     $has = ($j.mcpServers -and (@($j.mcpServers.PSObject.Properties.Name) -contains 'shared-memory'))
                 } catch { }
             }
-            if ($has) { Write-Ok "  $($p.name) -> conectado" } else { Write-Warn "  $($p.name) -> SIN los servidores compartidos" }
+            if ($has) { Write-Ok (Get-I18nStr 'HcSharedConnected' @($p.name)) }
+            else       { Write-Warn (Get-I18nStr 'HcSharedMissing' @($p.name)) }
         }
         if (-not (Resolve-NpxCommand)) {
-            Write-Err '  npx no esta en el PATH: los servidores compartidos no van a arrancar.'
+            Write-Err (Get-I18nStr 'HcNoNpx')
         }
     }
     else {
-        Write-Note 'Desactivada. Actívala con -SharedMemory o desde la interfaz.'
+        Write-Note (Get-I18nStr 'HcSharedOff')
     }
 
     $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' })
-    Write-Host "`nProcesos de Claude en ejecucion: $($procs.Count)" -ForegroundColor Gray
+    Write-Host "`n$(Get-I18nStr 'HcRunningProcs' @($procs.Count))" -ForegroundColor Gray
     Write-Host ''
 }
 
@@ -1470,7 +1856,7 @@ function Remove-StaleClaudeCodeBinaries {
                       Measure-Object -Property Length -Sum).Sum
             Remove-Item -LiteralPath $v.FullName -Recurse -Force -ErrorAction Stop
             $freed += $bytes
-            Write-Note "Binario viejo borrado: $(Split-Path -Leaf $ProfileDir)\claude-code\$($v.Name)"
+            Write-Note (Get-I18nStr 'MsgOldBinaryDeleted' @($(Split-Path -Leaf $ProfileDir), $($v.Name)))
         } catch { }
     }
     return $freed
@@ -1490,12 +1876,12 @@ function Get-DirectorySize {
 function Clear-ProfileCache {
     param([switch]$Deep)
     Write-Host ''
-    Write-Host '--- Limpiador de Cache y Archivos Temporales ---' -ForegroundColor Cyan
+    Write-Host (Get-I18nStr 'CacheTitle') -ForegroundColor Cyan
 
     $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' }
     if ($procs.Count -gt 0) {
-        Write-Warn "Hay $($procs.Count) proceso(s) de Claude en ejecucion."
-        Write-Warn 'Cierra todas las ventanas de Claude antes de limpiar la cache.'
+        Write-Warn (Get-I18nStr 'MsgProcsRunning' @($($procs.Count)))
+        Write-Warn (Get-I18nStr 'MsgCloseBeforeClean')
         return
     }
 
@@ -1507,7 +1893,7 @@ function Clear-ProfileCache {
     }
 
     if ($targets.Count -eq 0) {
-        Write-Note 'No se encontraron carpetas de perfiles para limpiar.'
+        Write-Note (Get-I18nStr 'MsgNoProfilesToClean')
         return
     }
 
@@ -1538,12 +1924,12 @@ function Clear-ProfileCache {
     }
 
     $freedMB = [math]::Round(($totalFreedBytes / 1MB), 2)
-    Write-Ok "Limpieza completada. Espacio en disco liberado: $freedMB MB"
+    Write-Ok (Get-I18nStr 'MsgCleanDone' @($freedMB))
 
     if ($heavyPending -gt 0) {
         $heavyMB = [math]::Round(($heavyPending / 1MB), 0)
-        Write-Note "Ademas hay $heavyMB MB en la imagen de la VM de Cowork ($($script:HeavyRegenerableDirs -join ', '))."
-        Write-Note 'Se puede borrar, pero la app la vuelve a descargar entera la proxima vez que uses Cowork.'
+        Write-Note (Get-I18nStr 'MsgHeavyPending' @($heavyMB, $($script:HeavyRegenerableDirs -join ', ')))
+        Write-Note (Get-I18nStr 'MsgHeavyHint')
     }
     Write-Host ''
     return $heavyPending
@@ -1553,7 +1939,7 @@ function Export-ProfileBackup {
     param([string]$DestinationZip)
 
     Write-Host ''
-    Write-Host '--- Respaldar Perfiles (Backup .zip) ---' -ForegroundColor Cyan
+    Write-Host (Get-I18nStr 'BackupTitle') -ForegroundColor Cyan
 
     $timestamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
     if ([string]::IsNullOrWhiteSpace($DestinationZip)) {
@@ -1565,14 +1951,14 @@ function Export-ProfileBackup {
     # saldria incompleta justo en lo que importa (la sesion).
     $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' })
     if ($procs.Count -gt 0) {
-        Write-Warn "Hay $($procs.Count) proceso(s) de Claude en ejecucion."
-        Write-Warn 'Cierra todas las ventanas de Claude antes de respaldar:'
-        Write-Warn 'con la app abierta, la sesion queda bloqueada y no se copia.'
+        Write-Warn (Get-I18nStr 'MsgProcsRunning' @($($procs.Count)))
+        Write-Warn (Get-I18nStr 'MsgCloseBeforeBackup')
+        Write-Warn (Get-I18nStr 'MsgCloseBeforeBackup2')
         return
     }
 
-    Write-Warn 'El backup incluye los tokens de sesion de todas las cuentas.'
-    Write-Warn 'Guarda el .zip en un sitio seguro: equivale a tus credenciales.'
+    Write-Warn (Get-I18nStr 'MsgBackupHasTokens')
+    Write-Warn (Get-I18nStr 'MsgBackupKeepSafe')
 
     $tempDir = Join-Path $env:TEMP "ClaudeMulti_Backup_$timestamp"
     if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
@@ -1602,23 +1988,23 @@ function Export-ProfileBackup {
             $null = robocopy $src.FullName $dst /E /XJ /R:0 /W:0 @xd /NFL /NDL /NJH /NJS /NP
             $rc = $LASTEXITCODE
             $global:LASTEXITCODE = 0
-            if ($rc -ge 16) { throw "robocopy fallo copiando $($src.Name) (codigo $rc)." }
-            if ($rc -ge 8)  { $skipped++ ; Write-Warn "Algunos archivos de '$($src.Name)' estaban en uso y se omitieron." }
-            Write-Note "Incluido: $($src.Name)"
+            if ($rc -ge 16) { throw (Get-I18nStr 'ErrRobocopyProfile' @($src.Name, $rc)) }
+            if ($rc -ge 8)  { $skipped++ ; Write-Warn (Get-I18nStr 'MsgFilesInUse' @($src.Name)) }
+            Write-Note (Get-I18nStr 'MsgIncluded' @($($src.Name)))
         }
 
         if (Test-Path -LiteralPath $DestinationZip) { Remove-Item -LiteralPath $DestinationZip -Force }
         Compress-Archive -Path (Join-Path $tempDir '*') -DestinationPath $DestinationZip -Force
         $zipMB = [math]::Round(((Get-Item -LiteralPath $DestinationZip).Length / 1MB), 2)
 
-        Write-Ok 'Backup creado exitosamente:'
-        Write-Note "$DestinationZip ($zipMB MB)"
+        Write-Ok (Get-I18nStr 'MsgBackupOk')
+        Write-Note (Get-I18nStr 'MsgBackupPath' @($DestinationZip, $zipMB))
         if ($skipped -gt 0) {
-            Write-Warn "$skipped perfil(es) quedaron incompletos por archivos en uso."
+            Write-Warn (Get-I18nStr 'MsgBackupIncomplete' @($skipped))
         }
     }
     catch {
-        Write-Err "Error al crear el backup: $($_.Exception.Message)"
+        Write-Err (Get-I18nStr 'MsgBackupError' @($($_.Exception.Message)))
     }
     finally {
         if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1629,21 +2015,21 @@ function Export-ProfileBackup {
 function Import-ProfileBackup {
     param([string]$SourceZip)
     if ([string]::IsNullOrWhiteSpace($SourceZip) -and -not $script:GuiLogger) {
-        $SourceZip = Read-Host 'Ingresa la ruta completa del archivo .zip de backup'
+        $SourceZip = Read-Host (Get-I18nStr 'AskBackupPath')
     }
     if ([string]::IsNullOrWhiteSpace($SourceZip)) { return }
     $SourceZip = $SourceZip.Trim('"').Trim("'")
 
     if (-not (Test-Path -LiteralPath $SourceZip)) {
-        Write-Warn "No se encontro el archivo: $SourceZip"
+        Write-Warn (Get-I18nStr 'MsgFileNotFound' @($SourceZip))
         return
     }
 
     # Restaurar sobre un perfil abierto deja la sesion en estado inconsistente.
     $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' })
     if ($procs.Count -gt 0) {
-        Write-Warn "Hay $($procs.Count) proceso(s) de Claude en ejecucion."
-        Write-Warn 'Cierra todas las ventanas de Claude antes de restaurar.'
+        Write-Warn (Get-I18nStr 'MsgProcsRunning' @($($procs.Count)))
+        Write-Warn (Get-I18nStr 'MsgCloseBeforeRestore')
         return
     }
 
@@ -1663,7 +2049,7 @@ function Import-ProfileBackup {
                 New-Item -ItemType Directory -Path $script:HomeDir -Force | Out-Null
             }
             Copy-Item -Path (Join-Path $homeBackup '*') -Destination $script:HomeDir -Recurse -Force
-            Write-Ok 'Configuracion de lanzador restaurada.'
+            Write-Ok (Get-I18nStr 'MsgLauncherRestored')
         }
 
         $profBackup = Join-Path $tempDir 'Profiles'
@@ -1674,15 +2060,15 @@ function Import-ProfileBackup {
                     New-Item -ItemType Directory -Path $targetAppData -Force | Out-Null
                 }
                 Copy-Item -Path (Join-Path $_.FullName '*') -Destination $targetAppData -Recurse -Force
-                Write-Ok "Restaurado perfil: $($_.Name)"
+                Write-Ok (Get-I18nStr 'MsgProfileRestored' @($($_.Name)))
             }
         }
 
-        Write-Ok 'Restauracion completada exitosamente.'
-        Write-Note 'Se recomienda ejecutar la configuracion para actualizar los accesos directos.'
+        Write-Ok (Get-I18nStr 'MsgRestoreOk')
+        Write-Note (Get-I18nStr 'MsgRestoreHint')
     }
     catch {
-        Write-Err "Error al restaurar el backup: $($_.Exception.Message)"
+        Write-Err (Get-I18nStr 'MsgRestoreError' @($($_.Exception.Message)))
     }
     finally {
         if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1709,23 +2095,25 @@ function Show-InteractiveMenu {
         Write-Host ("  " + (Get-I18nStr 'MenuTitle')) -ForegroundColor White
         Write-Host '=============================================================' -ForegroundColor White
         Write-Host ("  " + (Get-I18nStr 'CurrentInstances') + ": [ $currStr ]") -ForegroundColor Cyan
-        Write-Host ("  " + (Get-I18nStr 'CopyMcpsLabel') + ":        $(if ($script:CopyMcpConfig) { 'SI' } else { 'NO' })") -ForegroundColor Gray
-        Write-Host ("  Memoria compartida (-SharedMemory): $(if ($script:SharedMemoryOn) { 'SI -> ' + $SharedDir } else { 'NO' })") -ForegroundColor Gray
+        $mcpState = $(if ($script:CopyMcpConfig) { Get-I18nStr 'YesShort' } else { Get-I18nStr 'NoShort' })
+        Write-Host ("  " + (Get-I18nStr 'CopyMcpsLabel') + ": $mcpState") -ForegroundColor Gray
+        $sharedState = $(if ($script:SharedMemoryOn) { Get-I18nStr 'SharedMemOnAt' @($SharedDir) } else { Get-I18nStr 'NoShort' })
+        Write-Host ("  " + (Get-I18nStr 'SharedMemLabel') + ": $sharedState") -ForegroundColor Gray
         Write-Host ''
-        Write-Host "  [1] Ejecutar / Actualizar instalacion actual ($currStr)" -ForegroundColor Yellow
-        Write-Host '  [2] Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
-        Write-Host '  [3] Anadir una nueva instancia / perfil (ej: "Cuenta4" o "Trabajo")'
-        Write-Host '  [4] Asignar nota / correo a un perfil (ej: trabajo@empresa.com)' -ForegroundColor Green
-        Write-Host '  [5] Diagnostico de salud del sistema (Health Check)' -ForegroundColor Green
-        Write-Host '  [6] Limpiar cache y archivos temporales (liberar espacio en disco)' -ForegroundColor Green
-        Write-Host '  [7] Crear Backup de perfiles (.zip)' -ForegroundColor Green
-        Write-Host '  [8] Restaurar perfiles desde Backup (.zip)' -ForegroundColor Green
-        Write-Host '  [9] Alternar copia de MCPs a nuevos perfiles'
-        Write-Host '  [10] Alternar memoria compartida entre instancias (MCP)'
-        Write-Host '  [11] Revertir / Eliminar perfiles'
-        Write-Host '  [0] Salir'
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt1' @($currStr))) -ForegroundColor Yellow
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt2'))
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt3'))
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt4')) -ForegroundColor Green
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt5')) -ForegroundColor Green
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt6')) -ForegroundColor Green
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt7')) -ForegroundColor Green
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt8')) -ForegroundColor Green
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt9'))
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt10'))
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt11'))
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt0'))
         Write-Host ''
-        $opt = Read-Host 'Selecciona una opcion (0-11)'
+        $opt = Read-Host (Get-I18nStr 'SelectOpt')
 
         switch ($opt.Trim()) {
             '1' {
@@ -1773,7 +2161,7 @@ function Show-InteractiveMenu {
             '6' {
                 $heavy = Clear-ProfileCache
                 if ($heavy -gt 0) {
-                    $ans = Read-Host 'Borrar tambien la imagen de la VM de Cowork? (S/N)'
+                    $ans = Read-Host (Get-I18nStr 'AskDeepClean')
                     if ($ans -match '^[SsYy]') { [void](Clear-ProfileCache -Deep) }
                 }
             }
@@ -1790,14 +2178,14 @@ function Show-InteractiveMenu {
             '10' {
                 $script:SharedMemoryOn = -not $script:SharedMemoryOn
                 if ($script:SharedMemoryOn) {
-                    Write-Ok "Memoria compartida: ACTIVADA -> $SharedDir"
+                    Write-Ok (Get-I18nStr 'SharedMemOn' @($SharedDir))
                     if (-not (Resolve-NpxCommand)) {
-                        Write-Warn 'No se encontro npx en el PATH. Instala Node.js o los servidores no arrancaran.'
+                        Write-Warn (Get-I18nStr 'NoNpxWarnMenu')
                     }
-                    Write-Note 'Se aplica al ejecutar la opcion [1].'
+                    Write-Note (Get-I18nStr 'SharedMemApplyHint')
                 }
                 else {
-                    Write-Ok 'Memoria compartida: DESACTIVADA (no se quita de los perfiles ya configurados).'
+                    Write-Ok (Get-I18nStr 'SharedMemOff')
                 }
             }
             '11' {
@@ -1881,50 +2269,50 @@ function Invoke-MultiSetup {
     )
     Assert-ProfileNames -Names $TargetProfiles
 
-    Write-Step 'Buscando la instalacion de Claude Desktop...'
+    Write-Step (Get-I18nStr 'StepSearchingInstall')
     $install = Get-ClaudeInstall
 
     if (-not $install) {
-        Write-Err 'No se encontro Claude Desktop en este equipo.'
-        Write-Note 'Rutas revisadas: %LOCALAPPDATA%\AnthropicClaude, %ProgramFiles%\Claude y paquetes MSIX.'
-        Write-Note 'Instala Claude Desktop y vuelve a ejecutar este script.'
+        Write-Err (Get-I18nStr 'MsgNotFound')
+        Write-Note (Get-I18nStr 'MsgPathsChecked')
+        Write-Note (Get-I18nStr 'MsgInstallClaude')
         return $false
     }
 
-    Write-Ok "Modo de instalacion: $($install.Mode)"
-    Write-Note "Carpeta: $($install.Dir)"
-    if ($install.Version) { Write-Note "Version instalada: $($install.Version)" }
+    Write-Ok (Get-I18nStr 'MsgInstallMode' @($($install.Mode)))
+    Write-Note (Get-I18nStr 'MsgFolder' @($($install.Dir)))
+    if ($install.Version) { Write-Note (Get-I18nStr 'MsgInstalledVer' @($install.Version)) }
 
     $targetExe   = $install.Exe
     $portableNew = $false
 
     if ($install.Mode -eq 'Msix') {
-        Write-Step 'Instalacion tipo MSIX detectada (Microsoft Store).'
-        Write-Note 'Windows no permite lanzar el .exe desde WindowsApps con parametros,'
-        Write-Note 'asi que hay que hacer una copia portable en una carpeta normal.'
+        Write-Step (Get-I18nStr 'StepMsixDetected')
+        Write-Note (Get-I18nStr 'MsgMsixNote1')
+        Write-Note (Get-I18nStr 'MsgMsixNote2')
 
         $stamp      = Get-PortableStamp -PortablePath $TargetPortableDir
         $needsCopy  = $true
-        $copyReason = 'No hay copia portable todavia.'
+        $copyReason = (Get-I18nStr 'MsgNoPortableYet')
 
         if ($ForceRecopy) {
-            $copyReason = 'Se pidio -Force: se rehace la copia.'
+            $copyReason = (Get-I18nStr 'MsgForceRecopy')
         }
         elseif ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
             if ($stamp.version -eq $install.Version) {
                 $needsCopy  = $false
                 $targetExe  = $stamp.exe
-                Write-Ok "Copia portable al dia (version $($stamp.version)). No hay nada que actualizar."
+                Write-Ok (Get-I18nStr 'MsgPortableUpToDate' @($($stamp.version)))
             }
             else {
-                $copyReason = "Claude se actualizo: $($stamp.version) -> $($install.Version). Actualizando la copia..."
+                $copyReason = (Get-I18nStr 'MsgClaudeUpdated' @($stamp.version, $install.Version))
             }
         }
         elseif ($stamp) {
-            $copyReason = 'La copia portable esta incompleta o movida: se rehace.'
+            $copyReason = (Get-I18nStr 'MsgPortableIncomplete')
         }
         elseif (Test-Path -LiteralPath $TargetPortableDir) {
-            $copyReason = 'Hay una copia portable sin sello de version: se rehace para poder controlarla.'
+            $copyReason = (Get-I18nStr 'MsgPortableNoStamp')
         }
 
         if ($needsCopy) {
@@ -1932,10 +2320,10 @@ function Invoke-MultiSetup {
 
             $running = @(Get-PortableProcess -PortablePath $TargetPortableDir)
             if ($running.Count -gt 0) {
-                Write-Warn "Hay $($running.Count) proceso(s) de Claude corriendo desde $TargetPortableDir."
-                Write-Warn 'No se puede reemplazar la copia mientras esten abiertos.'
-                Write-Note 'Cierra esas ventanas de Claude y vuelve a intentar.'
-                Write-Note 'Por ahora se sigue usando la copia actual.'
+                Write-Warn (Get-I18nStr 'MsgPortableBusy' @($($running.Count), $TargetPortableDir))
+                Write-Warn (Get-I18nStr 'MsgCannotReplace')
+                Write-Note (Get-I18nStr 'MsgCloseAndRetry')
+                Write-Note (Get-I18nStr 'MsgKeepUsingCurrent')
                 $needsCopy = $false
                 if ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
                     $targetExe = $stamp.exe
@@ -1943,7 +2331,7 @@ function Invoke-MultiSetup {
                 else {
                     $found = Get-ChildItem -LiteralPath $TargetPortableDir -Filter 'claude.exe' -Recurse `
                                -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if (-not $found) { throw "No se encontro claude.exe dentro de $TargetPortableDir" }
+                    if (-not $found) { throw (Get-I18nStr 'ErrNoClaudeExe' @($TargetPortableDir)) }
                     $targetExe = $found.FullName
                 }
             }
@@ -1964,49 +2352,51 @@ function Invoke-MultiSetup {
         if (-not $copied) {
             if (@(Get-PortableProcess -PortablePath $TargetPortableDir).Count -gt 0) {
                 Write-Host ''
-                Write-Err 'La actualizacion fallo: hay Claude abierto desde la copia portable.'
-                Write-Note 'Cierra todas las ventanas de Claude y vuelve a intentar.'
+                Write-Err (Get-I18nStr 'MsgUpdateFailedBusy')
+                Write-Note (Get-I18nStr 'MsgCloseAllAndRetry')
                 return $false
             }
 
             Write-Host ''
-            Write-Warn 'La copia fallo por los permisos restrictivos de WindowsApps.'
-            Write-Warn 'La solucion es dar permiso de lectura al grupo Administradores'
-            Write-Warn 'sobre esa carpeta.'
+            Write-Warn (Get-I18nStr 'MsgCopyFailedPerms')
+            Write-Warn (Get-I18nStr 'MsgPermsFix1')
+            Write-Warn (Get-I18nStr 'MsgPermsFix2')
 
             $allowed = [bool]$GrantRead
             if (-not $allowed) {
                 try {
                     $allowed = $PSCmdlet.ShouldContinue(
-                        "Dar lectura al grupo Administradores sobre $($install.Dir)?",
-                        'Permisos de WindowsApps')
+                        (Get-I18nStr 'MsgPermsAsk' @($install.Dir)),
+                        (Get-I18nStr 'MsgPermsCaption'))
                 }
                 catch {
                     if ($script:GuiLogger) {
-                        $res = [System.Windows.Forms.MessageBox]::Show("Dar permisos de lectura al grupo Administradores sobre $($install.Dir)?", "Permisos WindowsApps", 'YesNo', 'Question')
+                        $res = [System.Windows.Forms.MessageBox]::Show(
+                            (Get-I18nStr 'GuiPermAsk' @($install.Dir)),
+                            (Get-I18nStr 'GuiPermTitle'), 'YesNo', 'Question')
                         $allowed = ($res -eq 'Yes')
                     } else {
-                        Write-Err 'Ejecucion no interactiva: usa -GrantWindowsAppsRead para autorizarlo.'
+                        Write-Err (Get-I18nStr 'MsgNonInteractive')
                         $allowed = $false
                     }
                 }
             }
 
             if (-not $allowed) {
-                Write-Note 'Cancelado.'
+                Write-Note (Get-I18nStr 'MsgCancelled')
                 return $false
             }
 
             if (-not (Test-Admin)) {
-                Write-Err 'Este paso necesita permisos de Administrador.'
-                Write-Note 'Cierra esta ventana y ejecuta con "Ejecutar como administrador".'
+                Write-Err (Get-I18nStr 'MsgNeedsAdmin')
+                Write-Note (Get-I18nStr 'MsgRunAsAdmin')
                 return $false
             }
 
             if ($PSCmdlet.ShouldProcess($install.Dir, 'takeown + icacls (lectura para Administradores)')) {
-                Write-Note 'Tomando posesion de la carpeta del paquete...'
+                Write-Note (Get-I18nStr 'MsgTakingOwnership')
                 & takeown.exe /F "$($install.Dir)" /R /D S | Out-Null
-                Write-Note 'Otorgando lectura a Administradores...'
+                Write-Note (Get-I18nStr 'MsgGrantingRead')
                 & icacls.exe "$($install.Dir)" /grant '*S-1-5-32-544:(OI)(CI)(RX)' /T /C /Q | Out-Null
 
                 Copy-ToPortable -Source $install.Dir -Destination $TargetPortableDir -Overwrite
@@ -2029,7 +2419,7 @@ function Invoke-MultiSetup {
                     $portableExe = $found.FullName
                 }
                 elseif (-not $WhatIfPreference) {
-                    throw "No se encontro claude.exe dentro de $TargetPortableDir"
+                    throw (Get-I18nStr 'ErrNoClaudeExe' @($TargetPortableDir))
                 }
                 elseif (-not $portableExe) {
                     $portableExe = Join-Path $TargetPortableDir 'claude.exe'
@@ -2041,69 +2431,69 @@ function Invoke-MultiSetup {
                 Set-PortableStamp -PortablePath $TargetPortableDir -Version $install.Version `
                                   -Exe $targetExe -Source $install.Dir
             }
-            Write-Ok "Copia portable lista (version $($install.Version)): $targetExe"
+            Write-Ok (Get-I18nStr 'MsgPortableReady' @($($install.Version), $targetExe))
         }
     }
     else {
-        Write-Ok 'No hace falta copia portable: el ejecutable se puede lanzar directo.'
+        Write-Ok (Get-I18nStr 'MsgNoPortableNeeded')
         if ($install.Exe -match '\\app-[0-9]') {
-            Write-Warn 'El ejecutable esta dentro de una carpeta con numero de version.'
+            Write-Warn (Get-I18nStr 'MsgVersionedFolder')
         }
     }
 
     if (-not $targetExe -or (-not (Test-Path -LiteralPath $targetExe) -and -not $WhatIfPreference)) {
-        throw 'No se pudo determinar el ejecutable de Claude Desktop.'
+        throw (Get-I18nStr 'ErrNoTargetExe')
     }
 
     # Se resuelve una sola vez, antes del bucle: si falta Node no tiene sentido
     # escribir la config en tres perfiles para que los tres fallen al arrancar.
     $sharedServers = $null
     if ($SharedMem) {
-        Write-Step 'Preparando la memoria compartida entre instancias...'
+        Write-Step (Get-I18nStr 'StepPreparingShared')
         $npx = Resolve-NpxCommand
         if (-not $npx) {
-            Write-Warn 'No se encontro npx en el PATH: los servidores MCP compartidos necesitan Node.js.'
+            Write-Warn (Get-I18nStr 'MsgNoNpxSetup')
             $stray = Find-NpxOutsidePath
             if ($stray) {
-                Write-Note "Node parece estar en $stray pero no esta en el PATH."
-                Write-Note 'Anade esa carpeta al PATH y vuelve a ejecutar con -SharedMemory.'
+                Write-Note (Get-I18nStr 'MsgNodeOutsidePath' @($stray))
+                Write-Note (Get-I18nStr 'MsgAddToPath')
             }
             else {
-                Write-Note 'Instala Node.js (https://nodejs.org) y vuelve a ejecutar con -SharedMemory.'
+                Write-Note (Get-I18nStr 'MsgInstallNode')
             }
-            Write-Note 'El resto de la configuracion sigue normalmente.'
+            Write-Note (Get-I18nStr 'MsgRestContinues')
         }
         else {
             Initialize-SharedMemory -SharedDir $TargetSharedDir
             $sharedServers = Get-SharedMemoryServers -SharedDir $TargetSharedDir
-            Write-Ok "Carpeta compartida: $TargetSharedDir"
-            Write-Note "npx: $npx"
+            Write-Ok (Get-I18nStr 'MsgSharedFolder' @($TargetSharedDir))
+            Write-Note (Get-I18nStr 'MsgNpxAt' @($npx))
         }
     }
 
     $iconDir = Join-Path $script:HomeDir 'icons'
-    Write-Step 'Generando iconos de color por perfil...'
+    Write-Step (Get-I18nStr 'StepGeneratingIcons')
     $icons = @{}
     for ($i = 0; $i -lt $TargetProfiles.Count; $i++) {
         $n = $TargetProfiles[$i]
         try {
             $ic = New-ProfileIcon -Name $n -Index $i -SourceExe $targetExe -OutDir $iconDir
             $icons[$n] = $ic
-            Write-Ok "$n -> $($ic.Color)"
+            Write-Ok (Get-I18nStr 'PairArrow' @($n, $ic.Color))
         }
         catch {
-            Write-Warn "No se pudo generar el icono de '$n': $($_.Exception.Message)"
+            Write-Warn (Get-I18nStr 'MsgIconFailed' @($n, $($_.Exception.Message)))
             $icons[$n] = $null
         }
     }
 
     if (-not $NoLaunch) {
-        Write-Step 'Instalando lanzador (comprueba actualizaciones antes de abrir)...'
+        Write-Step (Get-I18nStr 'StepInstallingLauncher')
         Install-Launcher -HomePath $script:HomeDir
         Write-Ok $script:HomeDir
     }
 
-    Write-Step 'Creando accesos directos en el Escritorio...'
+    Write-Step (Get-I18nStr 'StepCreatingShortcuts')
     $wscript  = Join-Path $env:WINDIR 'System32\wscript.exe'
     $vbs      = Join-Path $script:HomeDir 'launch.vbs'
     $created  = @()
@@ -2123,11 +2513,11 @@ function Invoke-MultiSetup {
         foreach ($old in (Get-ProfileShortcutPaths -Name $name)) {
             if ((Test-Path -LiteralPath $old) -and ((Split-Path -Leaf $old) -ne "$label.lnk")) {
                 if ($WhatIfPreference) {
-                    Write-Note "Whatif: se borraria el acceso anterior: $(Split-Path -Leaf $old)"
+                    Write-Note (Get-I18nStr 'MsgWhatIfRemoveOld' @($(Split-Path -Leaf $old)))
                 }
                 else {
                     Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
-                    Write-Note "Removido acceso directo anterior: $(Split-Path -Leaf $old)"
+                    Write-Note (Get-I18nStr 'MsgRemovedOldLnk' @($(Split-Path -Leaf $old)))
                 }
             }
         }
@@ -2149,7 +2539,7 @@ function Invoke-MultiSetup {
         # gracia es que las tres cuentas vean la misma carpeta.
         if ($sharedServers) {
             $w = @(Merge-McpServers -DestinationDir $dataDir -Servers $sharedServers -Overwrite:$ForceRecopy)
-            if ($w.Count -gt 0) { Write-Note "Memoria compartida en '$name' ($($w -join ', '))." }
+            if ($w.Count -gt 0) { Write-Note (Get-I18nStr 'MsgSharedInProfile' @($name, ($w -join ', '))) }
         }
 
         if ($useStore) {
@@ -2157,22 +2547,22 @@ function Invoke-MultiSetup {
                      -Target      (Join-Path $env:WINDIR 'explorer.exe') `
                      -Arguments   "shell:AppsFolder\$($install.Aumid)" `
                      -IconPath    $iconPath `
-                     -Description "Claude Desktop - perfil '$name'$noteStr (paquete de la Store)"
-            $via = 'Store'
+                     -Description (Get-I18nStr 'DescStore' @($name, $noteStr))
+            $via = (Get-I18nStr 'ViaStore')
         }
         elseif ($NoLaunch) {
             $arg = $(if ($i -eq 0) { '' } else { "--user-data-dir=`"$dataDir`"" })
             $lnk = New-ClaudeShortcut -Name $label -Target $targetExe -Arguments $arg `
-                     -IconPath $iconPath -Description "Claude Desktop - perfil '$name'$noteStr en $dataDir"
-            $via = 'Exe'
+                     -IconPath $iconPath -Description (Get-I18nStr 'DescExe' @($name, $noteStr, $dataDir))
+            $via = (Get-I18nStr 'ViaExe')
         }
         else {
             $lnk = New-ClaudeShortcut -Name $label `
                      -Target      $wscript `
                      -Arguments   "`"$vbs`" `"$name`"" `
                      -IconPath    $iconPath `
-                     -Description "Claude Desktop - perfil '$name'$noteStr (comprueba actualizaciones al abrir)"
-            $via = 'Lanzador'
+                     -Description (Get-I18nStr 'DescLauncher' @($name, $noteStr))
+            $via = (Get-I18nStr 'ViaLauncher')
         }
 
         $cfgProfs += [pscustomobject]@{
@@ -2183,13 +2573,13 @@ function Invoke-MultiSetup {
             exe      = $targetExe
             icon     = $iconPath
         }
-        $created += [pscustomobject]@{
-            Perfil = $name
-            Color  = $color
-            Lanza  = $via
-            Acceso = Split-Path -Leaf $lnk
-        }
-        Write-Ok "$label  [$color]"
+        $created += [pscustomobject]([ordered]@{
+            (Get-I18nStr 'HeaderPerfil') = $name
+            (Get-I18nStr 'HeaderColor')  = $color
+            (Get-I18nStr 'HeaderLanza')  = $via
+            (Get-I18nStr 'HeaderAcceso') = Split-Path -Leaf $lnk
+        })
+        Write-Ok (Get-I18nStr 'MsgProfileDone' @($label, $color))
     }
 
     # config.json se escribe SIEMPRE: ya no es solo del lanzador, es la lista
@@ -2226,7 +2616,7 @@ function Show-GuiWindow {
     Add-Type -AssemblyName System.Drawing
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Claude Desktop - Multi Instancia"
+    $form.Text = (Get-I18nStr 'GuiTitle')
     $form.Size = New-Object System.Drawing.Size(760, 648)
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
@@ -2290,7 +2680,7 @@ function Show-GuiWindow {
     $chkShared = New-Object System.Windows.Forms.CheckBox
     $chkShared.Location = New-Object System.Drawing.Point(15, 236)
     $chkShared.Size = New-Object System.Drawing.Size(320, 24)
-    $chkShared.Text = 'Memoria compartida (-SharedMemory)'
+    $chkShared.Text = (Get-I18nStr 'SharedMemLabel')
     $chkShared.Font = $fontNorm
     $chkShared.Checked = [bool]$script:SharedMemoryOn
     [void]$form.Controls.Add($chkShared)
@@ -2301,7 +2691,7 @@ function Show-GuiWindow {
     $btnRun = New-Object System.Windows.Forms.Button
     $btnRun.Location = New-Object System.Drawing.Point($btnX, 65)
     $btnRun.Size = New-Object System.Drawing.Size($btnW, 32)
-    $btnRun.Text = "Ejecutar / Actualizar Instancias"
+    $btnRun.Text = (Get-I18nStr 'GuiBtnRun')
     $btnRun.Font = $fontBtn
     $btnRun.BackColor = [System.Drawing.Color]::FromArgb(0, 122, 204)
     $btnRun.ForeColor = [System.Drawing.Color]::White
@@ -2311,7 +2701,7 @@ function Show-GuiWindow {
     $btnAdd = New-Object System.Windows.Forms.Button
     $btnAdd.Location = New-Object System.Drawing.Point($btnX, 102)
     $btnAdd.Size = New-Object System.Drawing.Size(185, 30)
-    $btnAdd.Text = "+ Anadir Perfil"
+    $btnAdd.Text = (Get-I18nStr 'GuiBtnAdd')
     $btnAdd.Font = $fontNorm
     $btnAdd.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
     $btnAdd.FlatStyle = 'Flat'
@@ -2320,7 +2710,7 @@ function Show-GuiWindow {
     $btnNote = New-Object System.Windows.Forms.Button
     $btnNote.Location = New-Object System.Drawing.Point(($btnX + 195), 102)
     $btnNote.Size = New-Object System.Drawing.Size(185, 30)
-    $btnNote.Text = "Editar Nota/Email"
+    $btnNote.Text = (Get-I18nStr 'GuiBtnNote')
     $btnNote.Font = $fontNorm
     $btnNote.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
     $btnNote.FlatStyle = 'Flat'
@@ -2329,7 +2719,7 @@ function Show-GuiWindow {
     $btnHealth = New-Object System.Windows.Forms.Button
     $btnHealth.Location = New-Object System.Drawing.Point($btnX, 137)
     $btnHealth.Size = New-Object System.Drawing.Size(185, 30)
-    $btnHealth.Text = "Health Check"
+    $btnHealth.Text = (Get-I18nStr 'GuiBtnHealth')
     $btnHealth.Font = $fontNorm
     $btnHealth.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
     $btnHealth.FlatStyle = 'Flat'
@@ -2338,7 +2728,7 @@ function Show-GuiWindow {
     $btnCache = New-Object System.Windows.Forms.Button
     $btnCache.Location = New-Object System.Drawing.Point(($btnX + 195), 137)
     $btnCache.Size = New-Object System.Drawing.Size(185, 30)
-    $btnCache.Text = "Limpiar Cache"
+    $btnCache.Text = (Get-I18nStr 'GuiBtnCache')
     $btnCache.Font = $fontNorm
     $btnCache.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
     $btnCache.FlatStyle = 'Flat'
@@ -2347,7 +2737,7 @@ function Show-GuiWindow {
     $btnBackup = New-Object System.Windows.Forms.Button
     $btnBackup.Location = New-Object System.Drawing.Point($btnX, 172)
     $btnBackup.Size = New-Object System.Drawing.Size(185, 30)
-    $btnBackup.Text = "Crear Backup (.zip)"
+    $btnBackup.Text = (Get-I18nStr 'GuiBtnBackup')
     $btnBackup.Font = $fontNorm
     $btnBackup.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
     $btnBackup.FlatStyle = 'Flat'
@@ -2356,7 +2746,7 @@ function Show-GuiWindow {
     $btnRestore = New-Object System.Windows.Forms.Button
     $btnRestore.Location = New-Object System.Drawing.Point(($btnX + 195), 172)
     $btnRestore.Size = New-Object System.Drawing.Size(185, 30)
-    $btnRestore.Text = "Restaurar Backup"
+    $btnRestore.Text = (Get-I18nStr 'GuiBtnRestore')
     $btnRestore.Font = $fontNorm
     $btnRestore.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
     $btnRestore.FlatStyle = 'Flat'
@@ -2365,7 +2755,7 @@ function Show-GuiWindow {
     $btnRevert = New-Object System.Windows.Forms.Button
     $btnRevert.Location = New-Object System.Drawing.Point($btnX, 207)
     $btnRevert.Size = New-Object System.Drawing.Size($btnW, 48)
-    $btnRevert.Text = "Revertir / Eliminar Perfiles Extra"
+    $btnRevert.Text = (Get-I18nStr 'GuiBtnRevert')
     $btnRevert.Font = $fontNorm
     $btnRevert.BackColor = [System.Drawing.Color]::FromArgb(150, 40, 40)
     $btnRevert.ForeColor = [System.Drawing.Color]::White
@@ -2411,8 +2801,8 @@ function Show-GuiWindow {
         $script:SharedMemoryOn = $chkShared.Checked
         $profs = Get-ConfiguredProfiles
         if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
-        Append-GuiLog "==> Ejecutando configuracion para perfiles: $($profs -join ', ')"
-        Append-GuiLog '    (si toca copiar Claude, la ventana quedara sin responder unos minutos)'
+        Append-GuiLog (Get-I18nStr 'GuiRunning' @($profs -join ', '))
+        Append-GuiLog (Get-I18nStr 'GuiRunningHint')
         Set-GuiBusy $true
         try {
             [void](Invoke-MultiSetup -TargetProfiles $profs -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
@@ -2423,18 +2813,18 @@ function Show-GuiWindow {
     })
 
     $btnAdd.Add_Click({
-        $newName = Show-InputDialog -Prompt "Ingresa el nombre de la nueva instancia:" -Title "Anadir Perfil" -DefaultValue "Trabajo"
+        $newName = Show-InputDialog -Prompt (Get-I18nStr 'GuiAddPrompt') -Title (Get-I18nStr 'GuiAddTitle') -DefaultValue (Get-I18nStr 'GuiAddDefault')
         if (-not [string]::IsNullOrWhiteSpace($newName)) {
             $newName = $newName.Trim()
             $profs = Get-ConfiguredProfiles
             if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
             if ($profs -contains $newName) {
-                [System.Windows.Forms.MessageBox]::Show("El perfil '$newName' ya existe.", "Claude Desktop", 'OK', 'Warning')
+                [System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'ProfileExists' @($newName)), (Get-I18nStr 'GuiTitle'), 'OK', 'Warning')
             } else {
                 $newList = @($profs) + $newName
                 $script:SharedMemoryOn = $chkShared.Checked
                 $txtLog.Clear()
-                Append-GuiLog "==> Anadiendo perfil '$newName'. Configurando..."
+                Append-GuiLog (Get-I18nStr 'GuiAdding' @($newName))
                 Set-GuiBusy $true
                 try {
                     [void](Invoke-MultiSetup -TargetProfiles $newList -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
@@ -2449,12 +2839,12 @@ function Show-GuiWindow {
     $btnNote.Add_Click({
         $selItem = $lstProfiles.SelectedItem
         if (-not $selItem) {
-            [System.Windows.Forms.MessageBox]::Show("Por favor selecciona un perfil de la lista para editar su nota/correo.", "Editar Nota", 'OK', 'Information')
+            [System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'GuiPickProfile'), (Get-I18nStr 'GuiNoteTitle'), 'OK', 'Information')
             return
         }
         $profName = ($selItem -replace '\s*\(.*\)$', '').Trim()
         $currentNote = Get-ProfileNote -Name $profName
-        $newNote = Show-InputDialog -Prompt "Ingresa la nota/correo para '$profName':" -Title "Editar Nota/Email" -DefaultValue $currentNote
+        $newNote = Show-InputDialog -Prompt (Get-I18nStr 'GuiNotePrompt' @($profName)) -Title (Get-I18nStr 'GuiNoteTitle') -DefaultValue $currentNote
         if ($newNote -ne $null) {
             $profs = Get-ConfiguredProfileObjects
             $found = $profs | Where-Object { $_.name -eq $profName } | Select-Object -First 1
@@ -2471,11 +2861,11 @@ function Show-GuiWindow {
                     $cfg.profiles = $profs
                     $json = $cfg | ConvertTo-Json -Depth 8
                     [IO.File]::WriteAllText($cfgFile, $json, (New-Object Text.UTF8Encoding($false)))
-                    Append-GuiLog "Nota de '$profName' actualizada a: '$($newNote.Trim())'."
+                    Append-GuiLog (Get-I18nStr 'GuiNoteUpdated' @($profName, $newNote.Trim()))
                 } catch { }
             }
             $txtLog.Clear()
-            Append-GuiLog "==> Reconstruyendo accesos directos en el Escritorio con los nuevos nombres..."
+            Append-GuiLog (Get-I18nStr 'GuiRebuilding')
             $profsToUpdate = Get-ConfiguredProfiles
             if ($profsToUpdate.Count -eq 0) { $profsToUpdate = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
             Set-GuiBusy $true
@@ -2490,20 +2880,20 @@ function Show-GuiWindow {
 
     $btnHealth.Add_Click({
         $txtLog.Clear()
-        Append-GuiLog "Iniciando Diagnostico Health Check..."
+        Append-GuiLog (Get-I18nStr 'GuiStartHealth')
         Invoke-HealthCheck
         Refresh-ProfileList
     })
 
     $btnCache.Add_Click({
         $txtLog.Clear()
-        Append-GuiLog "Iniciando Limpieza de Cache..."
+        Append-GuiLog (Get-I18nStr 'GuiStartCache')
         $heavy = Clear-ProfileCache
         if ($heavy -gt 0) {
             $heavyMB = [math]::Round(($heavy / 1MB), 0)
             $res = [System.Windows.Forms.MessageBox]::Show(
-                "Quedan $heavyMB MB en la imagen de la VM de Cowork.`n`nSe puede borrar, pero la app la volvera a descargar entera la proxima vez que uses Cowork.`n`nBorrarla igual?",
-                'Limpieza profunda', 'YesNo', 'Question')
+                (Get-I18nStr 'GuiDeepCleanMsg' @($heavyMB)),
+                (Get-I18nStr 'GuiDeepCleanTitle'), 'YesNo', 'Question')
             if ($res -eq 'Yes') {
                 Set-GuiBusy $true
                 try { [void](Clear-ProfileCache -Deep) } finally { Set-GuiBusy $false }
@@ -2514,8 +2904,8 @@ function Show-GuiWindow {
     $btnBackup.Add_Click({
         $txtLog.Clear()
         $dlgSave = New-Object System.Windows.Forms.SaveFileDialog
-        $dlgSave.Filter = "Archivos ZIP (*.zip)|*.zip"
-        $dlgSave.Title = "Guardar Backup de Perfiles"
+        $dlgSave.Filter = (Get-I18nStr 'GuiZipFilter')
+        $dlgSave.Title = (Get-I18nStr 'GuiSaveBackupTitle')
         $timestamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
         $dlgSave.FileName = "ClaudeMulti_Backup_$timestamp.zip"
         $dlgSave.InitialDirectory = [Environment]::GetFolderPath('Desktop')
@@ -2528,8 +2918,8 @@ function Show-GuiWindow {
     $btnRestore.Add_Click({
         $txtLog.Clear()
         $dlgOpen = New-Object System.Windows.Forms.OpenFileDialog
-        $dlgOpen.Filter = "Archivos ZIP (*.zip)|*.zip"
-        $dlgOpen.Title = "Seleccionar Backup a Restaurar"
+        $dlgOpen.Filter = (Get-I18nStr 'GuiZipFilter')
+        $dlgOpen.Title = (Get-I18nStr 'GuiOpenBackupTitle')
         $dlgOpen.InitialDirectory = [Environment]::GetFolderPath('Desktop')
 
         if ($dlgOpen.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
@@ -2539,12 +2929,12 @@ function Show-GuiWindow {
     })
 
     $btnRevert.Add_Click({
-        $res = [System.Windows.Forms.MessageBox]::Show("Seguro que deseas revertir y eliminar los accesos directos y datos de perfiles extra?", "Confirmar Reversion", 'YesNo', 'Warning')
+        $res = [System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'GuiConfirmRevert'), (Get-I18nStr 'GuiConfirmRevertTitle'), 'YesNo', 'Warning')
         if ($res -eq 'Yes') {
             $txtLog.Clear()
             $profs = Get-ConfiguredProfiles
             if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
-            Append-GuiLog "==> Revirtiendo instalacion de perfiles extra..."
+            Append-GuiLog (Get-I18nStr 'GuiReverting')
             Invoke-Revert -Names $profs -PortablePath $PortableDir -SkipConfirm:$true
             Refresh-ProfileList
         }
@@ -2599,7 +2989,7 @@ if ($wantsInteractive -and [Environment]::UserInteractive) {
     }
 }
 elseif ($wantsInteractive -and -not $PSBoundParameters.ContainsKey('Profiles')) {
-    Write-Note 'Host no interactivo: se usan los perfiles por defecto.'
+    Write-Note (Get-I18nStr 'MsgNonInteractiveDefaults')
 }
 
 $Profiles = @(
