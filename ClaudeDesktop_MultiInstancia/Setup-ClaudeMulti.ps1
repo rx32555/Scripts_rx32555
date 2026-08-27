@@ -834,6 +834,10 @@ if ($update) {
         # hay que citar a mano o una ruta como "C:\Users\A Nombre\..." se parte.
         $names = @($cfg.profiles | ForEach-Object { '"' + $_.name + '"' })
         $argv  = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$setup`"", '-Profiles') + $names
+        # Sin esto la actualizacion recopiaria al PortableDir por defecto y
+        # dejaria dos copias, con el config apuntando a la equivocada.
+        if ($cfg.portableDir) { $argv += @('-PortableDir', "`"$($cfg.portableDir)`"") }
+        if ($cfg.copyMcp)     { $argv += '-CopyMcpConfig' }
         # Ventana visible: la copia tarda y el usuario debe ver que pasa algo.
         Start-Process 'powershell.exe' -ArgumentList $argv -Wait
         try {
@@ -1133,7 +1137,6 @@ function Invoke-HealthCheck {
     $profs = Get-ConfiguredProfileObjects
     if ($profs.Count -gt 0) {
         Write-Host "`nEstado de perfiles configurados:" -ForegroundColor Cyan
-        $desktop = [Environment]::GetFolderPath('Desktop')
         foreach ($p in $profs) {
             $n = $p.name
             $dataDir = $p.dataDir
@@ -1145,10 +1148,10 @@ function Invoke-HealthCheck {
                     $sizeMB = [math]::Round(($bytes / 1MB), 1)
                 } catch { }
             }
-            $lnkOriginal = Join-Path $desktop "Claude - $n (perfil actual).lnk"
-            $lnkExtra    = Join-Path $desktop "Claude - $n.lnk"
-            $hasLnk      = (Test-Path -LiteralPath $lnkOriginal) -or (Test-Path -LiteralPath $lnkExtra)
-            
+            # No se puede componer el nombre a mano: el acceso real lleva la
+            # nota dentro ("Claude - Cuenta1 (correo@x.com) (perfil actual)").
+            $hasLnk = @(Get-ProfileShortcutPaths -Name $n).Count -gt 0
+
             $noteStr = $(if ($p.note) { " ($($p.note))" } else { '' })
             $statusStr = $(if ($exists) { "$sizeMB MB" } else { 'No creada' })
             $lnkStr    = $(if ($hasLnk) { 'Acceso directo [OK]' } else { 'Acceso directo [FALTA]' })
@@ -1184,7 +1187,61 @@ function Invoke-HealthCheck {
     Write-Host ''
 }
 
+# Carpetas regenerables dentro de una carpeta de datos de perfil. Sirven para
+# dos cosas: son lo que borra el limpiador y lo que NO entra en el backup.
+#
+# vm_bundles (la imagen de la VM de Cowork) puede pasar de 9 GB, y claude-code
+# guarda un claude.exe de ~300 MB por cada version que haya pasado por ahi.
+# Ninguna de las dos aporta nada a un respaldo: la app las vuelve a bajar.
+$script:DisposableDirs = @(
+    'Cache', 'Code Cache', 'GPUCache',
+    'DawnCache', 'DawnGraphiteCache', 'DawnWebGPUCache',
+    'blob_storage', 'Crashpad', 'logs', 'fcache',
+    'Shared Dictionary', 'pending-uploads', 'sentry'
+)
+
+# Tambien regenerables, pero volver a bajarlas cuesta GB de descarga. Fuera
+# del backup siempre; el limpiador solo las toca si se lo piden con -Deep.
+$script:HeavyRegenerableDirs = @('vm_bundles', 'claude-code-vm')
+
+# Versiones viejas del binario embebido de Claude Code: se conserva la mas
+# reciente de cada perfil (la que la app esta usando) y se borran las demas.
+function Remove-StaleClaudeCodeBinaries {
+    param([Parameter(Mandatory)][string]$ProfileDir)
+
+    $ccDir = Join-Path $ProfileDir 'claude-code'
+    if (-not (Test-Path -LiteralPath $ccDir)) { return 0 }
+
+    $versions = @(Get-ChildItem -LiteralPath $ccDir -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object { ConvertTo-SafeVersion $_.Name })
+    if ($versions.Count -le 1) { return 0 }
+
+    [long]$freed = 0
+    foreach ($v in $versions[0..($versions.Count - 2)]) {
+        try {
+            $bytes = (Get-ChildItem -LiteralPath $v.FullName -Recurse -ErrorAction SilentlyContinue |
+                      Measure-Object -Property Length -Sum).Sum
+            Remove-Item -LiteralPath $v.FullName -Recurse -Force -ErrorAction Stop
+            $freed += $bytes
+            Write-Note "Binario viejo borrado: $(Split-Path -Leaf $ProfileDir)\claude-code\$($v.Name)"
+        } catch { }
+    }
+    return $freed
+}
+
+function Get-DirectorySize {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return [long]0 }
+    try {
+        $sum = (Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue |
+                Measure-Object -Property Length -Sum).Sum
+        if ($sum) { return [long]$sum }
+    } catch { }
+    return [long]0
+}
+
 function Clear-ProfileCache {
+    param([switch]$Deep)
     Write-Host ''
     Write-Host '--- Limpiador de Cache y Archivos Temporales ---' -ForegroundColor Cyan
 
@@ -1207,25 +1264,42 @@ function Clear-ProfileCache {
         return
     }
 
-    $cacheSubdirs = @('Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'blob_storage', 'Crashpad', 'logs')
+    $toClear = @($script:DisposableDirs)
+    if ($Deep) { $toClear += $script:HeavyRegenerableDirs }
+
     [long]$totalFreedBytes = 0
+    [long]$heavyPending    = 0
 
     foreach ($dir in $targets) {
-        foreach ($sub in $cacheSubdirs) {
+        foreach ($sub in $toClear) {
             $path = Join-Path $dir $sub
             if (Test-Path -LiteralPath $path) {
                 try {
-                    $bytes = (Get-ChildItem -LiteralPath $path -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                    $bytes = Get-DirectorySize -Path $path
                     Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
                     $totalFreedBytes += $bytes
                 } catch { }
+            }
+        }
+        $totalFreedBytes += Remove-StaleClaudeCodeBinaries -ProfileDir $dir
+
+        if (-not $Deep) {
+            foreach ($sub in $script:HeavyRegenerableDirs) {
+                $heavyPending += Get-DirectorySize -Path (Join-Path $dir $sub)
             }
         }
     }
 
     $freedMB = [math]::Round(($totalFreedBytes / 1MB), 2)
     Write-Ok "Limpieza completada. Espacio en disco liberado: $freedMB MB"
+
+    if ($heavyPending -gt 0) {
+        $heavyMB = [math]::Round(($heavyPending / 1MB), 0)
+        Write-Note "Ademas hay $heavyMB MB en la imagen de la VM de Cowork ($($script:HeavyRegenerableDirs -join ', '))."
+        Write-Note 'Se puede borrar, pero la app la vuelve a descargar entera la proxima vez que uses Cowork.'
+    }
     Write-Host ''
+    return $heavyPending
 }
 
 function Export-ProfileBackup {
@@ -1275,9 +1349,10 @@ function Export-ProfileBackup {
 
         foreach ($src in $sources) {
             $dst = Join-Path $profDir $src.Name
-            $null = robocopy $src.FullName $dst /E /XJ /R:0 /W:0 `
-                        /XD 'Cache' 'Code Cache' 'GPUCache' 'DawnCache' 'blob_storage' 'Crashpad' 'logs' `
-                        /NFL /NDL /NJH /NJS /NP
+            # /XD acepta la lista tal cual: robocopy trata cada nombre suelto
+            # como carpeta a excluir en cualquier nivel del arbol.
+            $xd = @('/XD') + $script:DisposableDirs + $script:HeavyRegenerableDirs + @('claude-code')
+            $null = robocopy $src.FullName $dst /E /XJ /R:0 /W:0 @xd /NFL /NDL /NJH /NJS /NP
             $rc = $LASTEXITCODE
             $global:LASTEXITCODE = 0
             if ($rc -ge 16) { throw "robocopy fallo copiando $($src.Name) (codigo $rc)." }
@@ -1447,7 +1522,11 @@ function Show-InteractiveMenu {
                 Invoke-HealthCheck
             }
             '6' {
-                Clear-ProfileCache
+                $heavy = Clear-ProfileCache
+                if ($heavy -gt 0) {
+                    $ans = Read-Host 'Borrar tambien la imagen de la VM de Cowork? (S/N)'
+                    if ($ans -match '^[SsYy]') { [void](Clear-ProfileCache -Deep) }
+                }
             }
             '7' {
                 Export-ProfileBackup
@@ -1827,6 +1906,8 @@ function Invoke-MultiSetup {
         portableDir = $TargetPortableDir
         sourceExe   = $install.Exe
         version     = $install.Version
+        copyMcp     = [bool]$CopyMcp
+        noLauncher  = [bool]$NoLaunch
         profiles    = $cfgProfs
     })
 
@@ -2108,7 +2189,17 @@ function Show-GuiWindow {
     $btnCache.Add_Click({
         $txtLog.Clear()
         Append-GuiLog "Iniciando Limpieza de Cache..."
-        Clear-ProfileCache
+        $heavy = Clear-ProfileCache
+        if ($heavy -gt 0) {
+            $heavyMB = [math]::Round(($heavy / 1MB), 0)
+            $res = [System.Windows.Forms.MessageBox]::Show(
+                "Quedan $heavyMB MB en la imagen de la VM de Cowork.`n`nSe puede borrar, pero la app la volvera a descargar entera la proxima vez que uses Cowork.`n`nBorrarla igual?",
+                'Limpieza profunda', 'YesNo', 'Question')
+            if ($res -eq 'Yes') {
+                Set-GuiBusy $true
+                try { [void](Clear-ProfileCache -Deep) } finally { Set-GuiBusy $false }
+            }
+        }
     })
 
     $btnBackup.Add_Click({
