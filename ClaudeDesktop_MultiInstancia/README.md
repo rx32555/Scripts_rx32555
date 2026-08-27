@@ -120,6 +120,7 @@ Ambos deben quedar **en la misma carpeta**.
      - **Health Check**: Diagnóstico completo de ejecutables, accesos directos y espacio en disco.
      - **Limpiar Cache**: Elimina archivos temporales liberando MB/GB en disco.
      - **Crear / Restaurar Backup**: Genera o restaura respaldos comprimidos `.zip`.
+     - **Eliminar Perfil**: Borra el perfil seleccionado en la lista y deja el resto intacto.
      - **Revertir**: Elimina perfiles secundarios.
    - **Consola de Salida Integrada**: Muestra el progreso de cada acción en vivo dentro de la misma ventana.
 3. Si prefieres la consola de texto en terminal, puedes ejecutar el script con el parámetro `-CLI`.
@@ -139,6 +140,8 @@ Ambos deben quedar **en la misma carpeta**.
 | `-SharedMemory` | — | Siembra en **todos** los perfiles dos MCP servers apuntando a una carpeta común, para que las cuentas compartan contexto. Requiere Node.js. |
 | `-SharedDir` | `%APPDATA%\ClaudeShared` | Carpeta de la memoria compartida. Queda fuera de `%APPDATA%\ClaudeMulti` a propósito: `-Revert` no la borra. |
 | `-NoLauncher` | — | Los accesos directos apuntan al `.exe` directamente, sin comprobar versión al abrir. |
+| `-RemoveProfile` | — | Elimina uno o varios perfiles concretos y deja el resto intacto. No admite el primero. |
+| `-KeepData` | — | Con `-RemoveProfile`, conserva la carpeta de datos del perfil eliminado. |
 | `-Revert` | — | Deshace todo: accesos directos, carpetas de los perfiles extra, `%APPDATA%\ClaudeMulti` y copia portable. |
 | `-GrantWindowsAppsRead` | — | Autoriza sin preguntar el `takeown`+`icacls` sobre `WindowsApps`. Solo para ejecución desatendida. |
 | `-Force` | — | Fuerza la recopia aunque la versión coincida, sobrescribe la config MCP ya copiada y, con `-Revert`, borra sin preguntar. |
@@ -229,6 +232,22 @@ Detalles que importan:
 Crear un **segundo usuario de Windows** y usar *Ejecutar como otro usuario* (Shift + botón derecho sobre el acceso directo). Aislamiento total, cero cambios en permisos. La contra: es más incómodo para el día a día.
 
 ---
+
+## Eliminar un perfil suelto
+
+`-Revert` es todo o nada. Para quitar una cuenta y conservar las demás:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -RemoveProfile 'Cliente'
+```
+
+Borra su acceso directo, su carpeta `%APPDATA%\Claude-<Perfil>`, su icono y su entrada en `config.json`. El lanzador, la copia portable y los demás perfiles no se tocan. Pide confirmación antes de borrar datos; `-Force` la salta y `-WhatIf` solo enseña la lista.
+
+En la interfaz es el botón **Eliminar Perfil**, que actúa sobre el perfil seleccionado en la lista; en el menú de texto, la opción `[11]`.
+
+> **El primer perfil no se puede quitar por aquí.** Su carpeta de datos es `%APPDATA%\Claude` —tu sesión original, que `-Revert` tampoco borra nunca— y además *ser el primero de la lista* es justo lo que hace que un perfil use esa carpeta: si se fuera, el segundo pasaría a serlo y heredaría una sesión que no es la suya. Para desinstalar del todo está `-Revert`.
+
+Con `-KeepData` lo saca de la lista pero conserva la carpeta de datos: queda como *huérfana* y el Health Check te la recuerda, por si algún día quieres readoptarla.
 
 ## Revertir
 

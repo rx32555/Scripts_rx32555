@@ -50,6 +50,15 @@
     Autoriza sin preguntar el takeown+icacls sobre la carpeta del paquete MSIX,
     para escenarios desatendidos. Solo se usa si la copia falla por permisos.
 
+.PARAMETER RemoveProfile
+    Elimina uno o varios perfiles concretos y deja el resto intacto: borra su
+    acceso directo, su carpeta de datos, su icono y su entrada en config.json.
+    No sirve para el primer perfil, que usa %APPDATA%\Claude.
+
+.PARAMETER KeepData
+    Con -RemoveProfile, quita el perfil de la lista pero conserva su carpeta de
+    datos. Queda como carpeta huerfana, que el Health Check reporta.
+
 .PARAMETER Revert
     Deshace la configuracion: borra los accesos directos, las carpetas de datos
     de los perfiles extra y la copia portable. Nunca toca %APPDATA%\Claude.
@@ -77,6 +86,8 @@ param(
     [string]  $SharedDir   = (Join-Path $env:APPDATA 'ClaudeShared'),
     [switch]  $NoLauncher,
     [switch]  $GrantWindowsAppsRead,
+    [string[]]$RemoveProfile,
+    [switch]  $KeepData,
     [switch]  $Revert,
     [switch]  $Force,
     [string]  $Language    = $null,
@@ -129,9 +140,8 @@ $script:I18n = @{
         MenuOpt8                  = '[8] Restaurar perfiles desde Backup (.zip)'
         MenuOpt9                  = '[9] Alternar copia de MCPs a nuevos perfiles'
         MenuOpt10                 = '[10] Alternar memoria compartida entre instancias (MCP)'
-        MenuOpt11                 = '[11] Revertir / Eliminar perfiles'
         MenuOpt0                  = '[0] Salir'
-        SelectOpt                 = 'Selecciona una opcion (0-11)'
+        SelectOpt                 = 'Selecciona una opcion (0-12)'
         EnterTotalNum             = 'Ingresa el numero total de instancias deseado (ej: 4)'
         InvalidNum                = 'Numero no valido.'
         EnterNewName              = 'Ingresa el nombre del nuevo perfil o instancia (ej: Cuenta4 o Trabajo)'
@@ -343,6 +353,29 @@ $script:I18n = @{
         ViaStore                  = 'Store'
         ViaExe                    = 'Exe'
         ViaLauncher               = 'Lanzador'
+        MenuOpt11                 = '[11] Eliminar un perfil concreto (el resto queda intacto)'
+        MenuOpt12                 = '[12] Revertir / Eliminar toda la configuracion'
+        RmNotFound                = 'El perfil ''{0}'' no esta configurado.'
+        RmCantFirst               = '''{0}'' es el primer perfil: usa %APPDATA%\Claude, tu sesion original.'
+        RmCantFirstHint           = 'Ese no se borra por aqui. Para desinstalar del todo, usa -Revert.'
+        RmConfirm                 = 'Se va a borrar el perfil ''{0}'' y con el su sesion, sus MCPs y su historial:`n      {1}`n`nContinuar?'
+        RmConfirmTitle            = 'Eliminar perfil'
+        RmAddForce                = 'Anade -Force para borrar el perfil sin preguntar.'
+        StepRemovingProfile       = 'Eliminando el perfil ''{0}''...'
+        RmDataKept                = 'Carpeta de datos conservada: {0}'
+        RmConfigUpdated           = '''{0}'' quitado de config.json.'
+        RmDone                    = 'Perfil ''{0}'' eliminado. Los demas siguen intactos.'
+        RmPickTitle               = '--- Eliminar un perfil ---'
+        RmPickPrompt              = 'Numero del perfil a eliminar (vacio para cancelar)'
+        RmFirstTag                = '[primero: no se puede borrar]'
+        ActDeleteShortcut         = 'Eliminar acceso directo'
+        ActDeleteProfileData      = 'Eliminar carpeta de datos del perfil'
+        ActDeleteIcon             = 'Eliminar icono del perfil'
+        ActUpdateConfig           = 'Actualizar config.json'
+        GuiBtnRemove              = 'Eliminar Perfil'
+        GuiRemovePick             = 'Selecciona en la lista el perfil que quieres eliminar.'
+        GuiRemoving               = '==> Eliminando el perfil ''{0}''...'
+        GuiRemoveConfirm          = 'Eliminar el perfil ''{0}''?`n`nSe borran su acceso directo, su icono y su carpeta de datos (sesion, MCPs e historial).`n`nLos demas perfiles no se tocan.'
     }
     en = @{
         HeaderTitle               = 'Claude Desktop - Multi-Instance Setup'
@@ -371,9 +404,8 @@ $script:I18n = @{
         MenuOpt8                  = '[8] Restore profiles from backup (.zip)'
         MenuOpt9                  = '[9] Toggle copying MCPs to new profiles'
         MenuOpt10                 = '[10] Toggle shared memory across instances (MCP)'
-        MenuOpt11                 = '[11] Revert / Delete profiles'
         MenuOpt0                  = '[0] Exit'
-        SelectOpt                 = 'Select an option (0-11)'
+        SelectOpt                 = 'Select an option (0-12)'
         EnterTotalNum             = 'Enter the desired total number of instances (e.g. 4)'
         InvalidNum                = 'Invalid number.'
         EnterNewName              = 'Enter the name of the new profile or instance (e.g. Cuenta4 or Work)'
@@ -585,6 +617,29 @@ $script:I18n = @{
         ViaStore                  = 'Store'
         ViaExe                    = 'Exe'
         ViaLauncher               = 'Launcher'
+        MenuOpt11                 = '[11] Delete one specific profile (the rest stays untouched)'
+        MenuOpt12                 = '[12] Revert / Delete the whole setup'
+        RmNotFound                = 'Profile ''{0}'' is not configured.'
+        RmCantFirst               = '''{0}'' is the first profile: it uses %APPDATA%\Claude, your original session.'
+        RmCantFirstHint           = 'That one is not deleted here. To uninstall completely, use -Revert.'
+        RmConfirm                 = 'Profile ''{0}'' will be deleted, and with it its session, its MCPs and its history:`n      {1}`n`nContinue?'
+        RmConfirmTitle            = 'Delete profile'
+        RmAddForce                = 'Add -Force to delete the profile without asking.'
+        StepRemovingProfile       = 'Deleting profile ''{0}''...'
+        RmDataKept                = 'Data folder kept: {0}'
+        RmConfigUpdated           = '''{0}'' removed from config.json.'
+        RmDone                    = 'Profile ''{0}'' deleted. The others are untouched.'
+        RmPickTitle               = '--- Delete a profile ---'
+        RmPickPrompt              = 'Number of the profile to delete (empty to cancel)'
+        RmFirstTag                = '[first: cannot be deleted]'
+        ActDeleteShortcut         = 'Delete shortcut'
+        ActDeleteProfileData      = 'Delete profile data folder'
+        ActDeleteIcon             = 'Delete profile icon'
+        ActUpdateConfig           = 'Update config.json'
+        GuiBtnRemove              = 'Delete Profile'
+        GuiRemovePick             = 'Select the profile you want to delete from the list.'
+        GuiRemoving               = '==> Deleting profile ''{0}''...'
+        GuiRemoveConfirm          = 'Delete profile ''{0}''?`n`nIts shortcut, its icon and its data folder (session, MCPs and history) will be deleted.`n`nThe other profiles are not touched.'
     }
 }
 function Get-I18nStr {
@@ -1514,6 +1569,119 @@ function Get-ProfileShortcutPaths {
         ForEach-Object { $_.FullName }
 }
 
+# Borra UN perfil y deja el resto en pie: acceso directo, carpeta de datos,
+# icono y entrada en config.json.
+#
+# El primer perfil no se puede quitar por aqui. Su carpeta de datos es
+# %APPDATA%\Claude (la sesion original, que -Revert tampoco toca nunca), y
+# ademas "ser el primero de la lista" es lo que determina que un perfil use esa
+# carpeta: si se fuera, el segundo pasaria a serlo y heredaria una sesion que no
+# es la suya. Para desinstalar del todo esta -Revert.
+function Remove-SingleProfile {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [switch]$KeepData,
+        [switch]$SkipConfirm
+    )
+
+    $profs = @(Get-ConfiguredProfileObjects)
+    if ($profs.Count -eq 0) {
+        Write-Warn (Get-I18nStr 'HcNoProfiles')
+        return $false
+    }
+
+    $idx = -1
+    for ($i = 0; $i -lt $profs.Count; $i++) {
+        if ($profs[$i].name -eq $Name) { $idx = $i; break }
+    }
+    if ($idx -lt 0) {
+        Write-Warn (Get-I18nStr 'RmNotFound' @($Name))
+        return $false
+    }
+    if ($idx -eq 0) {
+        Write-Err (Get-I18nStr 'RmCantFirst' @($Name))
+        Write-Note (Get-I18nStr 'RmCantFirstHint')
+        return $false
+    }
+
+    $dataDir = $profs[$idx].dataDir
+    if (-not $dataDir) { $dataDir = Join-Path $env:APPDATA "Claude-$Name" }
+
+    # Salvaguarda: por muy roto que este config.json, aqui nunca se borra
+    # %APPDATA%\Claude.
+    $mainDir = Join-Path $env:APPDATA 'Claude'
+    if ([IO.Path]::GetFullPath($dataDir).TrimEnd('\') -eq [IO.Path]::GetFullPath($mainDir).TrimEnd('\')) {
+        Write-Err (Get-I18nStr 'RmCantFirst' @($Name))
+        return $false
+    }
+
+    if (-not $SkipConfirm -and -not $KeepData -and (Test-Path -LiteralPath $dataDir)) {
+        $go = $false
+        try {
+            $go = $PSCmdlet.ShouldContinue(
+                (Get-I18nStr 'RmConfirm' @($Name, $dataDir)),
+                (Get-I18nStr 'RmConfirmTitle'))
+        }
+        catch {
+            Write-Warn (Get-I18nStr 'MsgNoConfirmHost')
+            Write-Note (Get-I18nStr 'RmAddForce')
+            return $false
+        }
+        if (-not $go) {
+            Write-Note (Get-I18nStr 'OpCancelled')
+            return $false
+        }
+    }
+
+    Write-Step (Get-I18nStr 'StepRemovingProfile' @($Name))
+
+    foreach ($lnk in (Get-ProfileShortcutPaths -Name $Name)) {
+        if ($PSCmdlet.ShouldProcess($lnk, (Get-I18nStr 'ActDeleteShortcut'))) {
+            Remove-Item -LiteralPath $lnk -Force -ErrorAction SilentlyContinue
+            Write-Ok (Get-I18nStr 'MsgDeleted' @((Split-Path -Leaf $lnk)))
+        }
+    }
+
+    if ($KeepData) {
+        Write-Note (Get-I18nStr 'RmDataKept' @($dataDir))
+    }
+    elseif (Test-Path -LiteralPath $dataDir) {
+        if ($PSCmdlet.ShouldProcess($dataDir, (Get-I18nStr 'ActDeleteProfileData'))) {
+            Remove-Item -LiteralPath $dataDir -Recurse -Force
+            Write-Ok (Get-I18nStr 'MsgDeleted' @($dataDir))
+        }
+    }
+
+    $icon = Join-Path (Join-Path $script:HomeDir 'icons') "$Name.ico"
+    if (Test-Path -LiteralPath $icon) {
+        if ($PSCmdlet.ShouldProcess($icon, (Get-I18nStr 'ActDeleteIcon'))) {
+            Remove-Item -LiteralPath $icon -Force -ErrorAction SilentlyContinue
+            Write-Ok (Get-I18nStr 'MsgDeleted' @((Split-Path -Leaf $icon)))
+        }
+    }
+
+    $cfgFile = Join-Path $script:HomeDir 'config.json'
+    if (Test-Path -LiteralPath $cfgFile) {
+        if ($PSCmdlet.ShouldProcess($cfgFile, (Get-I18nStr 'ActUpdateConfig'))) {
+            try {
+                $cfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+                $cfg.profiles = @($cfg.profiles | Where-Object { $_.name -ne $Name })
+                $json = $cfg | ConvertTo-Json -Depth 8
+                [IO.File]::WriteAllText($cfgFile, $json, (New-Object Text.UTF8Encoding($false)))
+                Write-Ok (Get-I18nStr 'RmConfigUpdated' @($Name))
+            }
+            catch {
+                Write-Warn (Get-I18nStr 'MsgCfgUpdateFailed' @($_.Exception.Message))
+            }
+        }
+    }
+
+    if ($WhatIfPreference) { return $false }
+    Write-Ok (Get-I18nStr 'RmDone' @($Name))
+    return $true
+}
+
 function Invoke-Revert {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -2110,7 +2278,8 @@ function Show-InteractiveMenu {
         Write-Host ("  " + (Get-I18nStr 'MenuOpt8')) -ForegroundColor Green
         Write-Host ("  " + (Get-I18nStr 'MenuOpt9'))
         Write-Host ("  " + (Get-I18nStr 'MenuOpt10'))
-        Write-Host ("  " + (Get-I18nStr 'MenuOpt11'))
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt11')) -ForegroundColor Green
+        Write-Host ("  " + (Get-I18nStr 'MenuOpt12'))
         Write-Host ("  " + (Get-I18nStr 'MenuOpt0'))
         Write-Host ''
         $opt = Read-Host (Get-I18nStr 'SelectOpt')
@@ -2189,6 +2358,24 @@ function Show-InteractiveMenu {
                 }
             }
             '11' {
+                Write-Host ''
+                Write-Host (Get-I18nStr 'RmPickTitle') -ForegroundColor Cyan
+                for ($i = 0; $i -lt $current.Count; $i++) {
+                    $nt = Get-ProfileNote -Name $current[$i]
+                    $ntStr = $(if ($nt) { " ($nt)" } else { '' })
+                    $firstStr = $(if ($i -eq 0) { ' ' + (Get-I18nStr 'RmFirstTag') } else { '' })
+                    Write-Host (Get-I18nStr 'MenuProfileLine' @(($i + 1), $current[$i], "$ntStr$firstStr"))
+                }
+                Write-Host ''
+                $selRm = Read-Host (Get-I18nStr 'RmPickPrompt')
+                [int]$idxRm = 0
+                if ([int]::TryParse($selRm, [ref]$idxRm) -and $idxRm -ge 1 -and $idxRm -le $current.Count) {
+                    if (Remove-SingleProfile -Name $current[$idxRm - 1]) {
+                        $current = @(Get-ConfiguredProfiles)
+                    }
+                }
+            }
+            '12' {
                 Write-Host ''
                 Write-Warn (Get-I18nStr 'WarnDeleteData')
                 $ans = Read-Host (Get-I18nStr 'ConfirmRevert')
@@ -2752,9 +2939,19 @@ function Show-GuiWindow {
     $btnRestore.FlatStyle = 'Flat'
     [void]$form.Controls.Add($btnRestore)
 
+    $btnRemove = New-Object System.Windows.Forms.Button
+    $btnRemove.Location = New-Object System.Drawing.Point($btnX, 207)
+    $btnRemove.Size = New-Object System.Drawing.Size(185, 30)
+    $btnRemove.Text = (Get-I18nStr 'GuiBtnRemove')
+    $btnRemove.Font = $fontNorm
+    $btnRemove.BackColor = [System.Drawing.Color]::FromArgb(110, 60, 40)
+    $btnRemove.ForeColor = [System.Drawing.Color]::White
+    $btnRemove.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnRemove)
+
     $btnRevert = New-Object System.Windows.Forms.Button
-    $btnRevert.Location = New-Object System.Drawing.Point($btnX, 207)
-    $btnRevert.Size = New-Object System.Drawing.Size($btnW, 48)
+    $btnRevert.Location = New-Object System.Drawing.Point(($btnX + 195), 207)
+    $btnRevert.Size = New-Object System.Drawing.Size(185, 30)
     $btnRevert.Text = (Get-I18nStr 'GuiBtnRevert')
     $btnRevert.Font = $fontNorm
     $btnRevert.BackColor = [System.Drawing.Color]::FromArgb(150, 40, 40)
@@ -2786,7 +2983,7 @@ function Show-GuiWindow {
     # La copia portable corre en el hilo de UI y puede tardar minutos. No se
     # puede evitar el bloqueo sin runspaces, pero al menos se ve que trabaja
     # y no se aceptan clics que reentrarian en la misma operacion.
-    $allButtons = @($btnRun, $btnAdd, $btnNote, $btnHealth, $btnCache, $btnBackup, $btnRestore, $btnRevert)
+    $allButtons = @($btnRun, $btnAdd, $btnNote, $btnHealth, $btnCache, $btnBackup, $btnRestore, $btnRemove, $btnRevert)
     function Set-GuiBusy {
         param([bool]$Busy)
         foreach ($b in $allButtons) { $b.Enabled = -not $Busy }
@@ -2928,6 +3125,26 @@ function Show-GuiWindow {
         }
     })
 
+    $btnRemove.Add_Click({
+        $selItem = $lstProfiles.SelectedItem
+        if (-not $selItem) {
+            [void][System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'GuiRemovePick'),
+                (Get-I18nStr 'RmConfirmTitle'), 'OK', 'Information')
+            return
+        }
+        $profName = ($selItem -replace '\s*\(.*\)$', '').Trim()
+        $res = [System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'GuiRemoveConfirm' @($profName)),
+            (Get-I18nStr 'RmConfirmTitle'), 'YesNo', 'Warning')
+        if ($res -ne 'Yes') { return }
+        $txtLog.Clear()
+        Append-GuiLog (Get-I18nStr 'GuiRemoving' @($profName))
+        Set-GuiBusy $true
+        try { [void](Remove-SingleProfile -Name $profName -SkipConfirm) }
+        catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
+        finally { Set-GuiBusy $false }
+        Refresh-ProfileList
+    })
+
     $btnRevert.Add_Click({
         $res = [System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'GuiConfirmRevert'), (Get-I18nStr 'GuiConfirmRevertTitle'), 'YesNo', 'Warning')
         if ($res -eq 'Yes') {
@@ -2973,7 +3190,8 @@ if ($savedCfg) {
 
 # -GUI abre la interfaz aunque se hayan pasado -Profiles; sin argumentos, la
 # interfaz es el modo por defecto y -CLI fuerza el menu de texto.
-$wantsInteractive = $GUI -or $CLI -or (-not $PSBoundParameters.ContainsKey('Profiles') -and -not $Revert)
+$wantsInteractive = $GUI -or $CLI -or (-not $PSBoundParameters.ContainsKey('Profiles') -and
+                                       -not $Revert -and -not $RemoveProfile)
 
 if ($wantsInteractive -and [Environment]::UserInteractive) {
     if ($CLI) {
@@ -2998,6 +3216,17 @@ $Profiles = @(
     ForEach-Object { $_.Trim() } |
     Where-Object { $_ }
 )
+
+if ($RemoveProfile) {
+    $anyRemoved = $false
+    foreach ($rp in ($RemoveProfile | ForEach-Object { $_ -split ',' } |
+                     ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+        if (Remove-SingleProfile -Name $rp -KeepData:$KeepData -SkipConfirm:$Force) { $anyRemoved = $true }
+    }
+    Write-Host ''
+    # -WhatIf no elimina nada por definicion: no es un fallo.
+    exit $(if ($anyRemoved -or $WhatIfPreference) { 0 } else { 1 })
+}
 
 if ($Revert) {
     Invoke-Revert -Names $Profiles -PortablePath $PortableDir -SkipConfirm:$Force
