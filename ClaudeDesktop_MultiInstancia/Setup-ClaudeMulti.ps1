@@ -32,6 +32,16 @@
     a cada perfil nuevo. Solo esa clave: no copia sesion, credenciales ni las
     preferencias de UI ligadas a tu cuenta que viven en el mismo archivo.
 
+.PARAMETER SharedMemory
+    Siembra en TODOS los perfiles (incluido el primero) dos servidores MCP
+    apuntando a una carpeta comun, para que las cuentas compartan contexto.
+    Requiere Node.js. No comparte la memoria del chat: esa vive en el servidor
+    y esta atada a cada cuenta.
+
+.PARAMETER SharedDir
+    Carpeta de la memoria compartida. Por defecto %APPDATA%\ClaudeShared.
+    Queda fuera de %APPDATA%\ClaudeMulti a proposito: -Revert no la borra.
+
 .PARAMETER NoLauncher
     Los accesos directos apuntan directo al .exe, sin pasar por el lanzador que
     comprueba actualizaciones. Los iconos de color se siguen aplicando.
@@ -63,6 +73,8 @@ param(
     [string[]]$Profiles    = @('Cuenta1', 'Cuenta2', 'Cuenta3'),
     [string]  $PortableDir = 'C:\ClaudePortable',
     [switch]  $CopyMcpConfig,
+    [switch]  $SharedMemory,
+    [string]  $SharedDir   = (Join-Path $env:APPDATA 'ClaudeShared'),
     [switch]  $NoLauncher,
     [switch]  $GrantWindowsAppsRead,
     [switch]  $Revert,
@@ -683,6 +695,94 @@ function Copy-ToPortable {
     }
 }
 
+# Escribe servidores MCP en el claude_desktop_config.json de un perfil.
+#
+# Fusiona por clave en vez de reemplazar el nodo entero: cada cuenta puede
+# tener sus propios MCP servers y no hay por que pisarselos para sembrar uno.
+# El resto del archivo (preferences, coworkUserFilesPath...) queda intacto.
+function Merge-McpServers {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string]$DestinationDir,
+        [Parameter(Mandatory)][hashtable]$Servers,
+        [switch]$Overwrite
+    )
+
+    if ($Servers.Count -eq 0) { return @() }
+
+    $dst = Join-Path $DestinationDir 'claude_desktop_config.json'
+    $out = [pscustomobject]@{}
+    if (Test-Path -LiteralPath $dst) {
+        try { $out = Get-Content -LiteralPath $dst -Raw | ConvertFrom-Json }
+        catch {
+            Write-Warn "No se pudo leer $dst como JSON: se deja como esta."
+            return @()
+        }
+    }
+
+    $merged  = [ordered]@{}
+    $existing = @()
+    if ($out.PSObject.Properties.Name -contains 'mcpServers' -and $out.mcpServers) {
+        foreach ($prop in $out.mcpServers.PSObject.Properties) {
+            $merged[$prop.Name] = $prop.Value
+            $existing += $prop.Name
+        }
+    }
+
+    $written = @()
+    foreach ($key in $Servers.Keys) {
+        if (($existing -contains $key) -and -not $Overwrite) {
+            Write-Note "'$key' ya existe en ${DestinationDir} y se conserva (usa -Force para reemplazarlo)."
+            continue
+        }
+        $merged[$key] = $Servers[$key]
+        $written += $key
+    }
+    if ($written.Count -eq 0) { return @() }
+
+    if (-not $PSCmdlet.ShouldProcess($dst, "Escribir $($written.Count) MCP server(s): $($written -join ', ')")) {
+        return $written
+    }
+
+    if ($out.PSObject.Properties.Name -contains 'mcpServers') { $out.mcpServers = $merged }
+    else { $out | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue $merged }
+
+    if (-not (Test-Path -LiteralPath $DestinationDir)) {
+        New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+    }
+    # Sin BOM: el parser JSON de la app no lo tolera.
+    $json = $out | ConvertTo-Json -Depth 32
+    [IO.File]::WriteAllText($dst, $json, (New-Object Text.UTF8Encoding($false)))
+    return $written
+}
+
+function Remove-McpServers {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory)][string]$DestinationDir,
+        [Parameter(Mandatory)][string[]]$Names
+    )
+
+    $dst = Join-Path $DestinationDir 'claude_desktop_config.json'
+    if (-not (Test-Path -LiteralPath $dst)) { return @() }
+    try { $out = Get-Content -LiteralPath $dst -Raw | ConvertFrom-Json } catch { return @() }
+    if (-not ($out.PSObject.Properties.Name -contains 'mcpServers') -or -not $out.mcpServers) { return @() }
+
+    $kept    = [ordered]@{}
+    $removed = @()
+    foreach ($prop in $out.mcpServers.PSObject.Properties) {
+        if ($Names -contains $prop.Name) { $removed += $prop.Name }
+        else { $kept[$prop.Name] = $prop.Value }
+    }
+    if ($removed.Count -eq 0) { return @() }
+    if (-not $PSCmdlet.ShouldProcess($dst, "Quitar MCP server(s): $($removed -join ', ')")) { return $removed }
+
+    $out.mcpServers = $kept
+    $json = $out | ConvertTo-Json -Depth 32
+    [IO.File]::WriteAllText($dst, $json, (New-Object Text.UTF8Encoding($false)))
+    return $removed
+}
+
 function Copy-McpConfig {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -708,36 +808,120 @@ function Copy-McpConfig {
         return
     }
 
-    $servers = $null
-    if ($srcJson.PSObject.Properties.Name -contains 'mcpServers') { $servers = $srcJson.mcpServers }
-    $names = @()
-    if ($servers) { $names = @($servers.PSObject.Properties.Name) }
+    $servers = @{}
+    if ($srcJson.PSObject.Properties.Name -contains 'mcpServers' -and $srcJson.mcpServers) {
+        foreach ($prop in $srcJson.mcpServers.PSObject.Properties) { $servers[$prop.Name] = $prop.Value }
+    }
 
-    if ($names.Count -eq 0) {
+    if ($servers.Count -eq 0) {
         Write-Note 'Tu perfil actual no tiene MCP servers configurados: no hay nada que copiar.'
         return
     }
 
-    $dst = Join-Path $DestinationDir 'claude_desktop_config.json'
-    if ((Test-Path -LiteralPath $dst) -and -not $Overwrite) {
-        Write-Note "Ya hay config MCP en $DestinationDir (usa -Force para sobrescribir)."
-        return
+    $written = @(Merge-McpServers -DestinationDir $DestinationDir -Servers $servers -Overwrite:$Overwrite)
+    if ($written.Count -gt 0) {
+        Write-Note "MCPs copiados ($($written -join ', ')) -> $DestinationDir"
     }
+}
 
-    if (-not $PSCmdlet.ShouldProcess($dst, "Copiar $($names.Count) MCP server(s)")) { return }
+# --- Memoria compartida entre instancias -------------------------------------
+#
+# La memoria del CHAT de Claude Desktop vive en el servidor, atada a la cuenta:
+# no hay archivo local que copiar y no se puede compartir entre perfiles.
+#
+# Lo que si se puede es darle a las tres cuentas los MISMOS servidores MCP
+# apuntando a una carpeta comun. Cada instancia lee y escribe ahi, asi que el
+# contexto viaja entre cuentas aunque las conversaciones sigan separadas.
+#
+# (Aparte de esto, %USERPROFILE%\.claude ya es comun a todas las instancias:
+# --user-data-dir solo redirige la carpeta de Electron, no el HOME. La memoria
+# de Claude Code, CLAUDE.md y las skills ya se comparten sin hacer nada.)
 
-    # Si el destino ya tiene config, se conserva y solo se reemplaza mcpServers.
-    $out = [pscustomobject]@{}
-    if (Test-Path -LiteralPath $dst) {
-        try { $out = Get-Content -LiteralPath $dst -Raw | ConvertFrom-Json } catch { $out = [pscustomobject]@{} }
+# Lanzar los servidores en Windows tiene exactamente una forma que funciona.
+# Probadas las cinco candidatas contra un handshake MCP real:
+#
+#   cmd.exe /c npx -y <pkg>            OK
+#   cmd.exe /c "<ruta>\npx.cmd" ...    falla: cmd se come las comillas de una
+#                                      ruta con espacios ("C:Program" ...)
+#   <ruta>\npx.cmd  (sin shell)        EINVAL: desde el parche de
+#                                      CVE-2024-27980 Node no lanza .cmd
+#   <ruta>\npx.cmd  (con shell)        falla igual que la segunda
+#   npx  (sin shell)                   ENOENT
+#
+# Por eso la config se escribe como "cmd.exe /c npx ...", que es ademas la
+# forma que documenta MCP para Windows. Depende del PATH, no de una ruta.
+function Resolve-NpxCommand {
+    foreach ($n in @('npx.cmd', 'npx')) {
+        $c = Get-Command $n -ErrorAction SilentlyContinue
+        if ($c -and $c.Source) { return $c.Source }
     }
-    if ($out.PSObject.Properties.Name -contains 'mcpServers') { $out.mcpServers = $servers }
-    else { $out | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue $servers }
+    return $null
+}
 
-    # Sin BOM: el parser JSON de la app no lo tolera.
-    $json = $out | ConvertTo-Json -Depth 32
-    [IO.File]::WriteAllText($dst, $json, (New-Object Text.UTF8Encoding($false)))
-    Write-Note "MCPs copiados ($($names -join ', ')) -> $dst"
+# Solo para dar un error util: Node instalado pero fuera del PATH.
+function Find-NpxOutsidePath {
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:APPDATA, $env:LOCALAPPDATA)) {
+        if ([string]::IsNullOrWhiteSpace($base)) { continue }
+        foreach ($rel in @('nodejs\npx.cmd', 'npm\npx.cmd')) {
+            $try = Join-Path $base $rel
+            if (Test-Path -LiteralPath $try) { return $try }
+        }
+    }
+    return $null
+}
+
+$script:SharedReadme = @'
+# Memoria compartida entre las instancias de Claude Desktop
+
+Esta carpeta la leen y escriben TODAS las cuentas configuradas con
+Setup-ClaudeMulti. Es el unico contexto que viaja de una instancia a otra.
+
+- `memory.json` lo gestiona el servidor MCP `shared-memory`. No lo edites a
+  mano mientras haya ventanas de Claude abiertas.
+- El resto de archivos de esta carpeta los ve el servidor `shared-files`:
+  cualquier `.md` que dejes aqui queda disponible para las tres cuentas.
+
+Para darle contexto de un proyecto a todas tus cuentas, deja aqui un `.md`
+y pideselo por su nombre en el chat.
+
+Lo que NO se comparte: la memoria propia del chat de Claude (vive en el
+servidor, atada a cada cuenta), el historial de conversaciones y los
+proyectos. Eso es por diseno: son cuentas distintas.
+'@
+
+function Get-SharedMemoryServers {
+    param([Parameter(Mandatory)][string]$SharedDir)
+
+    $cmdExe = Join-Path $env:WINDIR 'System32\cmd.exe'
+    return @{
+        'shared-memory' = [ordered]@{
+            command = $cmdExe
+            args    = @('/c', 'npx', '-y', '@modelcontextprotocol/server-memory')
+            env     = [ordered]@{ MEMORY_FILE_PATH = (Join-Path $SharedDir 'memory.json') }
+        }
+        'shared-files' = [ordered]@{
+            command = $cmdExe
+            args    = @('/c', 'npx', '-y', '@modelcontextprotocol/server-filesystem', $SharedDir)
+        }
+    }
+}
+
+function Initialize-SharedMemory {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([Parameter(Mandatory)][string]$SharedDir)
+
+    if (-not (Test-Path -LiteralPath $SharedDir)) {
+        if ($PSCmdlet.ShouldProcess($SharedDir, 'Crear carpeta de memoria compartida')) {
+            New-Item -ItemType Directory -Path $SharedDir -Force | Out-Null
+        }
+    }
+    # Solo se siembra si no existe: es un archivo que el usuario puede editar.
+    $readme = Join-Path $SharedDir 'LEEME.md'
+    if (-not (Test-Path -LiteralPath $readme)) {
+        if ($PSCmdlet.ShouldProcess($readme, 'Escribir nota de la carpeta compartida')) {
+            [IO.File]::WriteAllText($readme, $script:SharedReadme, (New-Object Text.UTF8Encoding($false)))
+        }
+    }
 }
 
 # --- Lanzador por perfil -----------------------------------------------------
@@ -838,6 +1022,10 @@ if ($update) {
         # dejaria dos copias, con el config apuntando a la equivocada.
         if ($cfg.portableDir) { $argv += @('-PortableDir', "`"$($cfg.portableDir)`"") }
         if ($cfg.copyMcp)     { $argv += '-CopyMcpConfig' }
+        if ($cfg.sharedMemory) {
+            $argv += '-SharedMemory'
+            if ($cfg.sharedDir) { $argv += @('-SharedDir', "`"$($cfg.sharedDir)`"") }
+        }
         # Ventana visible: la copia tarda y el usuario debe ver que pasa algo.
         Start-Process 'powershell.exe' -ArgumentList $argv -Wait
         try {
@@ -1001,6 +1189,25 @@ function Invoke-Revert {
         }
     }
 
+    # Las carpetas de los perfiles extra ya se fueron con su config dentro,
+    # pero el primero vive en %APPDATA%\Claude y ese no se borra nunca: hay
+    # que sacarle a mano los servidores que le sembro -SharedMemory.
+    $sharedDirSaved = $null
+    $cfgFile = Join-Path $script:HomeDir 'config.json'
+    if (Test-Path -LiteralPath $cfgFile) {
+        try {
+            $cfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+            if ($cfg.sharedMemory) { $sharedDirSaved = $cfg.sharedDir }
+        } catch { }
+    }
+    if ($sharedDirSaved) {
+        Write-Step 'Quitando los servidores de memoria compartida del perfil principal...'
+        $gone = @(Remove-McpServers -DestinationDir (Join-Path $env:APPDATA 'Claude') `
+                    -Names @('shared-memory', 'shared-files'))
+        if ($gone.Count -gt 0) { Write-Ok "Quitados: $($gone -join ', ')" }
+        else { Write-Note 'No habia servidores compartidos que quitar.' }
+    }
+
     Write-Step 'Borrando lanzador e iconos...'
     if (Test-Path -LiteralPath $script:HomeDir) {
         if ($PSCmdlet.ShouldProcess($script:HomeDir, 'Eliminar lanzador, iconos y configuracion')) {
@@ -1025,6 +1232,9 @@ function Invoke-Revert {
 
     Write-Host ''
     Write-Ok "Intacto: $(Join-Path $env:APPDATA 'Claude') (tu perfil original)."
+    if ($sharedDirSaved -and (Test-Path -LiteralPath $sharedDirSaved)) {
+        Write-Ok "Intacto: $sharedDirSaved (memoria compartida). Borrala a mano si ya no la quieres."
+    }
 }
 
 function Get-ConfiguredProfiles {
@@ -1180,6 +1390,43 @@ function Invoke-HealthCheck {
         }
         Write-Note 'Vuelve a ejecutar la configuracion incluyendolos en -Profiles'
         Write-Note 'para readoptarlos, o borra la carpeta a mano si ya no los usas.'
+    }
+
+    Write-Host "`nMemoria compartida entre instancias:" -ForegroundColor Cyan
+    $cfgFile   = Join-Path $script:HomeDir 'config.json'
+    $sharedCfg = $null
+    if (Test-Path -LiteralPath $cfgFile) {
+        try { $sharedCfg = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json } catch { }
+    }
+    if ($sharedCfg -and $sharedCfg.sharedMemory) {
+        $sd = $sharedCfg.sharedDir
+        if (Test-Path -LiteralPath $sd) {
+            $memFile = Join-Path $sd 'memory.json'
+            $memKB   = $(if (Test-Path -LiteralPath $memFile) { [math]::Round((Get-Item -LiteralPath $memFile).Length / 1KB, 1) } else { 0 })
+            $docs    = @(Get-ChildItem -LiteralPath $sd -Filter '*.md' -File -ErrorAction SilentlyContinue).Count
+            Write-Ok "Activa -> $sd ($memKB KB de memoria, $docs documento(s) .md)"
+        }
+        else {
+            Write-Warn "Activa en config.json pero la carpeta no existe: $sd"
+        }
+        # Se comprueba perfil por perfil: alguien pudo quitar el server a mano.
+        foreach ($p in $profs) {
+            $cfgMcp = Join-Path $p.dataDir 'claude_desktop_config.json'
+            $has    = $false
+            if (Test-Path -LiteralPath $cfgMcp) {
+                try {
+                    $j = Get-Content -LiteralPath $cfgMcp -Raw | ConvertFrom-Json
+                    $has = ($j.mcpServers -and (@($j.mcpServers.PSObject.Properties.Name) -contains 'shared-memory'))
+                } catch { }
+            }
+            if ($has) { Write-Ok "  $($p.name) -> conectado" } else { Write-Warn "  $($p.name) -> SIN los servidores compartidos" }
+        }
+        if (-not (Resolve-NpxCommand)) {
+            Write-Err '  npx no esta en el PATH: los servidores compartidos no van a arrancar.'
+        }
+    }
+    else {
+        Write-Note 'Desactivada. Actívala con -SharedMemory o desde la interfaz.'
     }
 
     $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'claude' })
@@ -1463,6 +1710,7 @@ function Show-InteractiveMenu {
         Write-Host '=============================================================' -ForegroundColor White
         Write-Host ("  " + (Get-I18nStr 'CurrentInstances') + ": [ $currStr ]") -ForegroundColor Cyan
         Write-Host ("  " + (Get-I18nStr 'CopyMcpsLabel') + ":        $(if ($script:CopyMcpConfig) { 'SI' } else { 'NO' })") -ForegroundColor Gray
+        Write-Host ("  Memoria compartida (-SharedMemory): $(if ($script:SharedMemoryOn) { 'SI -> ' + $SharedDir } else { 'NO' })") -ForegroundColor Gray
         Write-Host ''
         Write-Host "  [1] Ejecutar / Actualizar instalacion actual ($currStr)" -ForegroundColor Yellow
         Write-Host '  [2] Especificar cantidad total de instancias (ej: 4 -> Cuenta1..Cuenta4)'
@@ -1473,10 +1721,11 @@ function Show-InteractiveMenu {
         Write-Host '  [7] Crear Backup de perfiles (.zip)' -ForegroundColor Green
         Write-Host '  [8] Restaurar perfiles desde Backup (.zip)' -ForegroundColor Green
         Write-Host '  [9] Alternar copia de MCPs a nuevos perfiles'
-        Write-Host '  [10] Revertir / Eliminar perfiles'
+        Write-Host '  [10] Alternar memoria compartida entre instancias (MCP)'
+        Write-Host '  [11] Revertir / Eliminar perfiles'
         Write-Host '  [0] Salir'
         Write-Host ''
-        $opt = Read-Host 'Selecciona una opcion (0-10)'
+        $opt = Read-Host 'Selecciona una opcion (0-11)'
 
         switch ($opt.Trim()) {
             '1' {
@@ -1539,6 +1788,19 @@ function Show-InteractiveMenu {
                 Write-Ok $(if ($script:CopyMcpConfig) { Get-I18nStr 'CopyMcpsActive' } else { Get-I18nStr 'CopyMcpsInactive' })
             }
             '10' {
+                $script:SharedMemoryOn = -not $script:SharedMemoryOn
+                if ($script:SharedMemoryOn) {
+                    Write-Ok "Memoria compartida: ACTIVADA -> $SharedDir"
+                    if (-not (Resolve-NpxCommand)) {
+                        Write-Warn 'No se encontro npx en el PATH. Instala Node.js o los servidores no arrancaran.'
+                    }
+                    Write-Note 'Se aplica al ejecutar la opcion [1].'
+                }
+                else {
+                    Write-Ok 'Memoria compartida: DESACTIVADA (no se quita de los perfiles ya configurados).'
+                }
+            }
+            '11' {
                 Write-Host ''
                 Write-Warn (Get-I18nStr 'WarnDeleteData')
                 $ans = Read-Host (Get-I18nStr 'ConfirmRevert')
@@ -1611,6 +1873,8 @@ function Invoke-MultiSetup {
         [string[]]$TargetProfiles,
         [string]$TargetPortableDir = $PortableDir,
         [switch]$CopyMcp,
+        [switch]$SharedMem,
+        [string]$TargetSharedDir = $SharedDir,
         [switch]$NoLaunch,
         [switch]$GrantRead,
         [switch]$ForceRecopy
@@ -1791,6 +2055,32 @@ function Invoke-MultiSetup {
         throw 'No se pudo determinar el ejecutable de Claude Desktop.'
     }
 
+    # Se resuelve una sola vez, antes del bucle: si falta Node no tiene sentido
+    # escribir la config en tres perfiles para que los tres fallen al arrancar.
+    $sharedServers = $null
+    if ($SharedMem) {
+        Write-Step 'Preparando la memoria compartida entre instancias...'
+        $npx = Resolve-NpxCommand
+        if (-not $npx) {
+            Write-Warn 'No se encontro npx en el PATH: los servidores MCP compartidos necesitan Node.js.'
+            $stray = Find-NpxOutsidePath
+            if ($stray) {
+                Write-Note "Node parece estar en $stray pero no esta en el PATH."
+                Write-Note 'Anade esa carpeta al PATH y vuelve a ejecutar con -SharedMemory.'
+            }
+            else {
+                Write-Note 'Instala Node.js (https://nodejs.org) y vuelve a ejecutar con -SharedMemory.'
+            }
+            Write-Note 'El resto de la configuracion sigue normalmente.'
+        }
+        else {
+            Initialize-SharedMemory -SharedDir $TargetSharedDir
+            $sharedServers = Get-SharedMemoryServers -SharedDir $TargetSharedDir
+            Write-Ok "Carpeta compartida: $TargetSharedDir"
+            Write-Note "npx: $npx"
+        }
+    }
+
     $iconDir = Join-Path $script:HomeDir 'icons'
     Write-Step 'Generando iconos de color por perfil...'
     $icons = @{}
@@ -1855,6 +2145,13 @@ function Invoke-MultiSetup {
             }
         }
 
+        # A diferencia de -CopyMcpConfig, esto SI aplica al primer perfil: la
+        # gracia es que las tres cuentas vean la misma carpeta.
+        if ($sharedServers) {
+            $w = @(Merge-McpServers -DestinationDir $dataDir -Servers $sharedServers -Overwrite:$ForceRecopy)
+            if ($w.Count -gt 0) { Write-Note "Memoria compartida en '$name' ($($w -join ', '))." }
+        }
+
         if ($useStore) {
             $lnk = New-ClaudeShortcut -Name $label `
                      -Target      (Join-Path $env:WINDIR 'explorer.exe') `
@@ -1908,6 +2205,8 @@ function Invoke-MultiSetup {
         version     = $install.Version
         copyMcp     = [bool]$CopyMcp
         noLauncher  = [bool]$NoLaunch
+        sharedMemory = [bool]$SharedMem
+        sharedDir    = $TargetSharedDir
         profiles    = $cfgProfs
     })
 
@@ -1928,7 +2227,7 @@ function Show-GuiWindow {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Claude Desktop - Multi Instancia"
-    $form.Size = New-Object System.Drawing.Size(760, 620)
+    $form.Size = New-Object System.Drawing.Size(760, 648)
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
@@ -1987,6 +2286,14 @@ function Show-GuiWindow {
     $chkCopyMcp.Font = $fontNorm
     $chkCopyMcp.Checked = [bool]$script:CopyMcpConfig
     [void]$form.Controls.Add($chkCopyMcp)
+
+    $chkShared = New-Object System.Windows.Forms.CheckBox
+    $chkShared.Location = New-Object System.Drawing.Point(15, 236)
+    $chkShared.Size = New-Object System.Drawing.Size(320, 24)
+    $chkShared.Text = 'Memoria compartida (-SharedMemory)'
+    $chkShared.Font = $fontNorm
+    $chkShared.Checked = [bool]$script:SharedMemoryOn
+    [void]$form.Controls.Add($chkShared)
 
     [int]$btnX = 350
     [int]$btnW = 380
@@ -2057,7 +2364,7 @@ function Show-GuiWindow {
 
     $btnRevert = New-Object System.Windows.Forms.Button
     $btnRevert.Location = New-Object System.Drawing.Point($btnX, 207)
-    $btnRevert.Size = New-Object System.Drawing.Size($btnW, 28)
+    $btnRevert.Size = New-Object System.Drawing.Size($btnW, 48)
     $btnRevert.Text = "Revertir / Eliminar Perfiles Extra"
     $btnRevert.Font = $fontNorm
     $btnRevert.BackColor = [System.Drawing.Color]::FromArgb(150, 40, 40)
@@ -2066,7 +2373,7 @@ function Show-GuiWindow {
     [void]$form.Controls.Add($btnRevert)
 
     $txtLog = New-Object System.Windows.Forms.TextBox
-    $txtLog.Location = New-Object System.Drawing.Point(15, 245)
+    $txtLog.Location = New-Object System.Drawing.Point(15, 268)
     $txtLog.Size = New-Object System.Drawing.Size(715, 320)
     $txtLog.Multiline = $true
     $txtLog.ReadOnly = $true
@@ -2101,13 +2408,14 @@ function Show-GuiWindow {
     $btnRun.Add_Click({
         $txtLog.Clear()
         $script:CopyMcpConfig = $chkCopyMcp.Checked
+        $script:SharedMemoryOn = $chkShared.Checked
         $profs = Get-ConfiguredProfiles
         if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
         Append-GuiLog "==> Ejecutando configuracion para perfiles: $($profs -join ', ')"
         Append-GuiLog '    (si toca copiar Claude, la ventana quedara sin responder unos minutos)'
         Set-GuiBusy $true
         try {
-            [void](Invoke-MultiSetup -TargetProfiles $profs -CopyMcp:$script:CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
+            [void](Invoke-MultiSetup -TargetProfiles $profs -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
         }
         catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
         finally { Set-GuiBusy $false }
@@ -2124,11 +2432,12 @@ function Show-GuiWindow {
                 [System.Windows.Forms.MessageBox]::Show("El perfil '$newName' ya existe.", "Claude Desktop", 'OK', 'Warning')
             } else {
                 $newList = @($profs) + $newName
+                $script:SharedMemoryOn = $chkShared.Checked
                 $txtLog.Clear()
                 Append-GuiLog "==> Anadiendo perfil '$newName'. Configurando..."
                 Set-GuiBusy $true
                 try {
-                    [void](Invoke-MultiSetup -TargetProfiles $newList -CopyMcp:$script:CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
+                    [void](Invoke-MultiSetup -TargetProfiles $newList -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
                 }
                 catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
                 finally { Set-GuiBusy $false }
@@ -2171,7 +2480,7 @@ function Show-GuiWindow {
             if ($profsToUpdate.Count -eq 0) { $profsToUpdate = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
             Set-GuiBusy $true
             try {
-                [void](Invoke-MultiSetup -TargetProfiles $profsToUpdate -CopyMcp:$script:CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
+                [void](Invoke-MultiSetup -TargetProfiles $profsToUpdate -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
             }
             catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
             finally { Set-GuiBusy $false }
@@ -2252,6 +2561,26 @@ Write-Host '=============================================================' -Fore
 Write-Host ("  " + (Get-I18nStr 'HeaderTitle')) -ForegroundColor White
 Write-Host '=============================================================' -ForegroundColor White
 
+# El checkbox de la interfaz y el menu arrancan con lo que quedo guardado la
+# ultima vez, no en blanco. Lo que venga por linea de comandos manda.
+$script:SharedMemoryOn = [bool]$SharedMemory
+$savedCfg = $null
+$savedCfgFile = Join-Path $script:HomeDir 'config.json'
+if (Test-Path -LiteralPath $savedCfgFile) {
+    try { $savedCfg = Get-Content -LiteralPath $savedCfgFile -Raw | ConvertFrom-Json } catch { }
+}
+if ($savedCfg) {
+    if ($savedCfg.sharedMemory -and -not $PSBoundParameters.ContainsKey('SharedMemory')) {
+        $script:SharedMemoryOn = $true
+    }
+    if ($savedCfg.sharedDir -and -not $PSBoundParameters.ContainsKey('SharedDir')) {
+        $SharedDir = $savedCfg.sharedDir
+    }
+    if ($savedCfg.copyMcp -and -not $PSBoundParameters.ContainsKey('CopyMcpConfig')) {
+        $CopyMcpConfig = $true
+    }
+}
+
 # -GUI abre la interfaz aunque se hayan pasado -Profiles; sin argumentos, la
 # interfaz es el modo por defecto y -CLI fuerza el menu de texto.
 $wantsInteractive = $GUI -or $CLI -or (-not $PSBoundParameters.ContainsKey('Profiles') -and -not $Revert)
@@ -2286,5 +2615,5 @@ if ($Revert) {
     exit 0
 }
 
-[void](Invoke-MultiSetup -TargetProfiles $Profiles -TargetPortableDir $PortableDir -CopyMcp:$CopyMcpConfig -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
+[void](Invoke-MultiSetup -TargetProfiles $Profiles -TargetPortableDir $PortableDir -CopyMcp:$CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
 exit 0

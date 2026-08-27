@@ -116,6 +116,7 @@ Ambos deben quedar **en la misma carpeta**.
      - ▶ **Ejecutar / Actualizar Instancias**: Configura e instala las instancias.
      - **+ Anadir Perfil**: Crea una nueva cuenta personalizada (`Trabajo`, `Cuenta4`, etc.) manteniendo intactas las existentes.
      - **Editar Nota/Email**: Asigna una dirección o nota (ej. `trabajo@empresa.com`) a cualquier perfil.
+     - **Memoria compartida** (casilla): activa los MCP servers comunes a todas las cuentas.
      - **Health Check**: Diagnóstico completo de ejecutables, accesos directos y espacio en disco.
      - **Limpiar Cache**: Elimina archivos temporales liberando MB/GB en disco.
      - **Crear / Restaurar Backup**: Genera o restaura respaldos comprimidos `.zip`.
@@ -134,7 +135,9 @@ Ambos deben quedar **en la misma carpeta**.
 | `-CLI` | — | Fuerza el modo consola de texto interactivo en terminal. |
 | `-Language` | Auto (`es`/`en`) | Idioma de la interfaz (`es` para español ASCII, `en` para inglés). |
 | `-PortableDir` | `C:\ClaudePortable` | Destino de la copia portable (solo MSIX). |
-| `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. |
+| `-CopyMcpConfig` | — | Copia el nodo `mcpServers` de tu `claude_desktop_config.json` a cada perfil nuevo. Fusiona por clave: no pisa los MCP servers que ya tuviera ese perfil. |
+| `-SharedMemory` | — | Siembra en **todos** los perfiles dos MCP servers apuntando a una carpeta común, para que las cuentas compartan contexto. Requiere Node.js. |
+| `-SharedDir` | `%APPDATA%\ClaudeShared` | Carpeta de la memoria compartida. Queda fuera de `%APPDATA%\ClaudeMulti` a propósito: `-Revert` no la borra. |
 | `-NoLauncher` | — | Los accesos directos apuntan al `.exe` directamente, sin comprobar versión al abrir. |
 | `-Revert` | — | Deshace todo: accesos directos, carpetas de los perfiles extra, `%APPDATA%\ClaudeMulti` y copia portable. |
 | `-GrantWindowsAppsRead` | — | Autoriza sin preguntar el `takeown`+`icacls` sobre `WindowsApps`. Solo para ejecución desatendida. |
@@ -149,6 +152,9 @@ powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Pers
 # Tres perfiles
 powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo','Cliente'
 
+# Las tres cuentas compartiendo la misma carpeta de contexto
+powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo','Cliente' -SharedMemory
+
 # Ver qué haría, sin hacerlo
 powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo' -WhatIf
 
@@ -158,6 +164,39 @@ powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Force
 
 ---
 
+## Qué se comparte y qué no
+
+`--user-data-dir` solo redirige la carpeta de Electron. Lo que vive **fuera** de ella es común a todas las instancias, se quiera o no.
+
+| | Dónde vive | ¿Compartido? |
+|---|---|---|
+| Sesión, chats, proyectos | `%APPDATA%\Claude-<Perfil>` | No — por eso existe este script |
+| Memoria del chat ("Claude recuerda") | Servidor, atada a la cuenta | No, y no hay forma local de hacerlo |
+| MCP servers del Desktop | `claude_desktop_config.json`, dentro de la carpeta del perfil | No, salvo `-CopyMcpConfig` o `-SharedMemory` |
+| Memoria de Claude Code, `CLAUDE.md`, skills, plugins | `%USERPROFILE%\.claude` | **Sí, siempre** |
+| Credenciales de Claude Code | `%USERPROFILE%\.claude\.credentials.json` | **Sí, siempre** |
+
+Esa última fila conviene tenerla presente: la sesión de Claude Code **no** sigue a la cuenta con la que abriste esa ventana de Desktop.
+
+### `-SharedMemory`
+
+La memoria del chat no se puede compartir, pero sí se le pueden dar a las tres cuentas los **mismos MCP servers apuntando a una carpeta común**. Con `-SharedMemory` el script siembra en cada perfil —incluido el primero— dos servidores:
+
+| Servidor | Qué hace |
+|---|---|
+| `shared-memory` | Grafo de conocimiento sobre `<SharedDir>\memory.json`. Lo que una cuenta guarda, las otras lo leen. |
+| `shared-files` | Acceso de lectura/escritura a `<SharedDir>`. Deja ahí un `.md` y las tres cuentas lo ven. |
+
+La carpeta se crea con un `LEEME.md` que explica para qué es.
+
+Detalles que importan:
+
+- **Necesita Node.js en el `PATH`.** La config se escribe como `cmd.exe /c npx -y <paquete>`, que es la única forma que funciona en Windows: `npx` a secas da `ENOENT`, apuntar directo a `npx.cmd` da `EINVAL` desde el parche de CVE-2024-27980 (Node ya no lanza `.cmd` sin shell), y meter la ruta de `npx.cmd` entre comillas dentro de `cmd /c` se rompe si tiene espacios. Si no encuentra `npx`, el script avisa y sigue con el resto de la configuración sin tocar nada.
+- **Fusiona, no reemplaza.** Si un perfil ya tenía MCP servers propios, se conservan. Y si `shared-memory` ya existe, no se sobrescribe salvo con `-Force`.
+- **Hay que reiniciar Claude** para que la ventana recoja los servidores nuevos.
+- **No hay bloqueo entre instancias.** Si dos ventanas escriben en `memory.json` a la vez, gana la última. Para uso normal —una cuenta anotando, las otras leyendo— no da problemas.
+- **`-Revert` no borra `SharedDir`.** Vive fuera de `%APPDATA%\ClaudeMulti` justo para eso; si ya no la quieres, bórrala a mano.
+
 ## Advertencias
 
 - **Cowork corre en una VM Hyper-V única por máquina.** Solo una instancia puede usar Cowork a la vez. El chat normal sí funciona en ambas en paralelo.
@@ -165,6 +204,7 @@ powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Force
 - **La copia portable no se actualiza sola en segundo plano.** Se actualiza al ejecutar `Setup-ClaudeMulti.bat`, que detecta la versión nueva por su cuenta (ver *Actualizaciones*). Si pasas semanas sin ejecutarlo, tus perfiles extra corren la versión vieja.
 - **La copia portable pierde la identidad de paquete MSIX.** En las instancias extra pueden no funcionar los deep links `claude://`, las notificaciones nativas y el auto-update. El chat, los proyectos y los MCPs sí.
 - **Permisos de `WindowsApps`.** En muchos equipos la carpeta ya es legible y no hace falta admin: el script **intenta la copia primero** y solo si falla ofrece dar lectura al grupo Administradores mediante `takeown` + `icacls`, pidiendo confirmación explícita. Es una carpeta protegida del sistema y en casos raros puede afectar las actualizaciones automáticas del paquete. Responder `N` cancela sin tocar nada.
+- **Cowork ocupa mucho disco.** La imagen de la VM (`vm_bundles`) puede pasar de 9 GB por perfil que la use. Queda fuera de los backups siempre, y *Limpiar Cache* solo la borra si lo confirmas — la app la vuelve a descargar entera la próxima vez.
 - Esta es una solución de usuario, no algo soportado oficialmente por Anthropic.
 
 ---
