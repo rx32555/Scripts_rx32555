@@ -78,7 +78,7 @@ El primer perfil no depende de esto: se lanza por el paquete de la Store y Windo
 | `launch.vbs` | Arranca el lanzador oculto, sin parpadeo de consola negra |
 | `Launch-ClaudeProfile.ps1` | Compara versiones, actualiza si toca y abre el perfil |
 | `Setup-ClaudeMulti.ps1` | Copia del script, para que el lanzador pueda actualizar aunque muevas el repositorio |
-| `config.json` | Perfiles, rutas y modo de instalación |
+| `config.json` | La lista de perfiles con sus notas, las rutas, el modo de instalación y los ajustes recordados (`copyMcp`, `sharedMemory`, `sharedDir`). Lo leen el lanzador, el menú y la interfaz. |
 | `icons\*.ico` | Un icono por perfil |
 
 Con `-NoLauncher` los accesos directos apuntan al `.exe` directamente (comportamiento clásico, sin comprobación al abrir). Los iconos de color se siguen aplicando.
@@ -117,11 +117,11 @@ Ambos deben quedar **en la misma carpeta**.
      - **+ Anadir Perfil**: Crea una nueva cuenta personalizada (`Trabajo`, `Cuenta4`, etc.) manteniendo intactas las existentes.
      - **Editar Nota/Email**: Asigna una dirección o nota (ej. `trabajo@empresa.com`) a cualquier perfil.
      - **Memoria compartida** (casilla): activa los MCP servers comunes a todas las cuentas.
-     - **Health Check**: Diagnóstico completo de ejecutables, accesos directos y espacio en disco.
-     - **Limpiar Cache**: Elimina archivos temporales liberando MB/GB en disco.
-     - **Crear / Restaurar Backup**: Genera o restaura respaldos comprimidos `.zip`.
+     - **Health Check**: Ejecutable, accesos directos, tamaño de cada perfil, estado de la memoria compartida y perfiles huérfanos.
+     - **Limpiar Cache**: Borra cachés y las versiones viejas del binario de Claude Code. La imagen de la VM de Cowork solo si lo confirmas.
+     - **Crear / Restaurar Backup**: Respaldo `.zip` de sesiones y configuración, sin cachés ni la VM.
      - **Eliminar Perfil**: Borra el perfil seleccionado en la lista y deja el resto intacto.
-     - **Revertir**: Elimina perfiles secundarios.
+     - **Revertir**: Desinstala todo (accesos directos, perfiles extra, lanzador y copia portable).
    - **Consola de Salida Integrada**: Muestra el progreso de cada acción en vivo dentro de la misma ventana.
 3. Si prefieres la consola de texto en terminal, puedes ejecutar el script con el parámetro `-CLI`.
 
@@ -144,7 +144,7 @@ Ambos deben quedar **en la misma carpeta**.
 | `-KeepData` | — | Con `-RemoveProfile`, conserva la carpeta de datos del perfil eliminado. |
 | `-Revert` | — | Deshace todo: accesos directos, carpetas de los perfiles extra, `%APPDATA%\ClaudeMulti` y copia portable. |
 | `-GrantWindowsAppsRead` | — | Autoriza sin preguntar el `takeown`+`icacls` sobre `WindowsApps`. Solo para ejecución desatendida. |
-| `-Force` | — | Fuerza la recopia aunque la versión coincida, sobrescribe la config MCP ya copiada y, con `-Revert`, borra sin preguntar. |
+| `-Force` | — | Fuerza la recopia aunque la versión coincida, reemplaza los MCP servers ya sembrados (incluidos los de `-SharedMemory`) y, con `-Revert` o `-RemoveProfile`, borra sin preguntar. |
 
 Además soporta `-WhatIf` y `-Confirm`: `-WhatIf` muestra exactamente qué se crearía o borraría sin tocar nada.
 
@@ -182,6 +182,8 @@ El script reconoce los dos sufijos, así que si cambias de idioma reemplaza el a
 
 El texto de la interfaz es ASCII puro a propósito (`configuracion`, no `configuración`): la consola de Windows no tiene un juego de caracteres fiable y los acentos salían como símbolos raros.
 
+---
+
 ## Qué se comparte y qué no
 
 `--user-data-dir` solo redirige la carpeta de Electron. Lo que vive **fuera** de ella es común a todas las instancias, se quiera o no.
@@ -215,21 +217,17 @@ Detalles que importan:
 - **No hay bloqueo entre instancias.** Si dos ventanas escriben en `memory.json` a la vez, gana la última. Para uso normal —una cuenta anotando, las otras leyendo— no da problemas.
 - **`-Revert` no borra `SharedDir`.** Vive fuera de `%APPDATA%\ClaudeMulti` justo para eso; si ya no la quieres, bórrala a mano.
 
+---
+
 ## Advertencias
 
 - **Cowork corre en una VM Hyper-V única por máquina.** Solo una instancia puede usar Cowork a la vez. El chat normal sí funciona en ambas en paralelo.
-- **Los MCPs no se heredan.** `claude_desktop_config.json` vive *dentro* de la carpeta de datos, así que cada perfil nuevo arranca con cero MCP servers. Usa `-CopyMcpConfig` para sembrarlos, o vuelve a configurarlos a mano. Ese archivo mezcla los MCP servers con preferencias de UI ligadas a la cuenta, por eso el script copia **solo** la clave `mcpServers`.
+- **Los MCPs no se heredan.** `claude_desktop_config.json` vive *dentro* de la carpeta de datos, así que cada perfil nuevo arranca con cero MCP servers. Usa `-CopyMcpConfig` para sembrarlos, o vuelve a configurarlos a mano. Ese archivo mezcla los MCP servers con preferencias de UI ligadas a la cuenta, por eso el script toca **solo** la clave `mcpServers`, y dentro de ella fusiona por nombre: no pisa los servidores que ese perfil ya tuviera.
 - **La copia portable no se actualiza sola en segundo plano.** Se actualiza al ejecutar `Setup-ClaudeMulti.bat`, que detecta la versión nueva por su cuenta (ver *Actualizaciones*). Si pasas semanas sin ejecutarlo, tus perfiles extra corren la versión vieja.
 - **La copia portable pierde la identidad de paquete MSIX.** En las instancias extra pueden no funcionar los deep links `claude://`, las notificaciones nativas y el auto-update. El chat, los proyectos y los MCPs sí.
 - **Permisos de `WindowsApps`.** En muchos equipos la carpeta ya es legible y no hace falta admin: el script **intenta la copia primero** y solo si falla ofrece dar lectura al grupo Administradores mediante `takeown` + `icacls`, pidiendo confirmación explícita. Es una carpeta protegida del sistema y en casos raros puede afectar las actualizaciones automáticas del paquete. Responder `N` cancela sin tocar nada.
 - **Cowork ocupa mucho disco.** La imagen de la VM (`vm_bundles`) puede pasar de 9 GB por perfil que la use. Queda fuera de los backups siempre, y *Limpiar Cache* solo la borra si lo confirmas — la app la vuelve a descargar entera la próxima vez.
 - Esta es una solución de usuario, no algo soportado oficialmente por Anthropic.
-
----
-
-## Alternativa sin modificar el sistema
-
-Crear un **segundo usuario de Windows** y usar *Ejecutar como otro usuario* (Shift + botón derecho sobre el acceso directo). Aislamiento total, cero cambios en permisos. La contra: es más incómodo para el día a día.
 
 ---
 
@@ -249,6 +247,8 @@ En la interfaz es el botón **Eliminar Perfil**, que actúa sobre el perfil sele
 
 Con `-KeepData` lo saca de la lista pero conserva la carpeta de datos: queda como *huérfana* y el Health Check te la recuerda, por si algún día quieres readoptarla.
 
+---
+
 ## Revertir
 
 ```powershell
@@ -257,7 +257,15 @@ powershell -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1 -Profiles 'Pers
 
 Usa los **mismos** `-Profiles` (y `-PortableDir`, si lo cambiaste) que al instalar. Borra los accesos directos, las carpetas `%APPDATA%\Claude-<Perfil>` de los perfiles extra, `%APPDATA%\ClaudeMulti` (lanzador e iconos) y la copia portable. Pide confirmación antes de borrar datos de perfiles; añade `-Force` para saltarla o `-WhatIf` para solo ver la lista.
 
-El perfil original en `%APPDATA%\Claude` nunca se toca.
+El perfil original en `%APPDATA%\Claude` nunca se toca; solo se le quitan los servidores que hubiera sembrado `-SharedMemory`. La carpeta de memoria compartida tampoco se borra (ver *`-SharedMemory`*).
+
+Para quitar **una** cuenta y conservar las demás, usa `-RemoveProfile` en vez de esto.
+
+---
+
+## Alternativa sin modificar el sistema
+
+Crear un **segundo usuario de Windows** y usar *Ejecutar como otro usuario* (Shift + botón derecho sobre el acceso directo). Aislamiento total, cero cambios en permisos. La contra: es más incómodo para el día a día.
 
 ---
 
@@ -266,3 +274,4 @@ El perfil original en `%APPDATA%\Claude` nunca se toca.
 - Windows 10 / 11
 - **Windows PowerShell 5.1** (el `powershell.exe` que trae Windows). PowerShell 7 no incluye `Get-AppxPackage`, así que no detecta las instalaciones de Microsoft Store; el script lo avisa y te dice cómo relanzarlo. El `.bat` ya usa el intérprete correcto.
 - Claude Desktop instalado
+- **Node.js** solo si vas a usar `-SharedMemory`: los MCP servers compartidos se lanzan con `npx`, que tiene que estar en el `PATH`
