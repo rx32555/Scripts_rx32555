@@ -1,5 +1,23 @@
 # Setup-ClaudeMulti
 
+### Correccion del arranque (septiembre 2026)
+
+El lanzador transmite los perfiles como datos JSON a PowerShell. Corrige un
+fallo por el que, al actualizar antes de abrir, el tercer nombre podia asignarse
+a `-RemoveProfile` y provocar una pregunta de eliminacion. Los parametros del
+setup ahora requieren su nombre explicito; `-Profiles Cuenta1,Cuenta2,Cuenta3`
+sigue siendo valido desde el `.bat`.
+
+La actualizacion comprueba el codigo de salida antes de abrir Claude, repara
+sellos ausentes y conserva la ruta portable guardada al abrir la interfaz.
+Para verificar las regresiones sin modificar perfiles:
+
+```powershell
+powershell.exe -NoProfile -File .\tests\Launcher.Tests.ps1
+powershell.exe -NoProfile -File .\tests\PortableCopy.Tests.ps1
+powershell.exe -NoProfile -STA -File .\tests\GuiBackground.Tests.ps1
+```
+
 Script de PowerShell para correr **tres o más instancias de Claude Desktop en paralelo** en el mismo PC, cada una con su propia cuenta, sesión, historial local, MCPs y configuración.
 
 Anthropic no ofrece cambio de cuenta nativo: hay que cerrar sesión y volver a entrar cada vez. Este script elimina ese paso.
@@ -63,7 +81,7 @@ Al copiar la app, el script deja un sello `C:\ClaudePortable\.claude-multi.json`
 | Situación | Qué hace |
 |-----------|----------|
 | Misma versión | Nada. Termina en ~1 segundo. |
-| Claude se actualizó | Rehace la copia portable sola y avisa `1.26000 -> 1.26832`. |
+| Claude se actualizó | Prepara y valida una copia nueva; luego la activa y retira la anterior. Si falla, la versión que funcionaba queda intacta. |
 | Copia borrada, movida o corrupta | La rehace. |
 | Hay Claude abierto desde la copia portable | No toca nada y abre igual (no se puede reemplazar un `.exe` en uso). |
 
@@ -90,7 +108,7 @@ Con `-NoLauncher` los accesos directos apuntan al `.exe` directamente (comportam
 | Instalación | Ruta típica | Copia portable | ¿Admin? |
 |-------------|-------------|----------------|---------|
 | Installer `.exe` | `%LOCALAPPDATA%\AnthropicClaude` | No hace falta | No |
-| MSIX / Microsoft Store | `C:\Program Files\WindowsApps` | Sí, a `C:\ClaudePortable` | Sí |
+| MSIX / Microsoft Store | `C:\Program Files\WindowsApps` | Sí, a `C:\ClaudePortable` | Normalmente no |
 
 Windows bloquea ejecutar un `.exe` desde `WindowsApps` pasándole parámetros. Por eso en el segundo caso se necesita la copia previa.
 
@@ -122,7 +140,7 @@ Ambos deben quedar **en la misma carpeta**.
      - **Crear / Restaurar Backup**: Respaldo `.zip` de sesiones y configuración, sin cachés ni la VM.
      - **Eliminar Perfil**: Borra el perfil seleccionado en la lista y deja el resto intacto.
      - **Revertir**: Desinstala todo (accesos directos, perfiles extra, lanzador y copia portable).
-   - **Consola de Salida Integrada**: Muestra el progreso de cada acción en vivo dentro de la misma ventana.
+   - **Consola de Salida Integrada**: Muestra el progreso en vivo. La instalación y actualización corren en segundo plano, así que la ventana sigue respondiendo durante la copia.
 3. Si prefieres la consola de texto en terminal, puedes ejecutar el script con el parámetro `-CLI`.
 
 ---
@@ -223,7 +241,7 @@ Detalles que importan:
 
 - **Cowork corre en una VM Hyper-V única por máquina.** Solo una instancia puede usar Cowork a la vez. El chat normal sí funciona en ambas en paralelo.
 - **Los MCPs no se heredan.** `claude_desktop_config.json` vive *dentro* de la carpeta de datos, así que cada perfil nuevo arranca con cero MCP servers. Usa `-CopyMcpConfig` para sembrarlos, o vuelve a configurarlos a mano. Ese archivo mezcla los MCP servers con preferencias de UI ligadas a la cuenta, por eso el script toca **solo** la clave `mcpServers`, y dentro de ella fusiona por nombre: no pisa los servidores que ese perfil ya tuviera.
-- **La copia portable no se actualiza sola en segundo plano.** Se actualiza al ejecutar `Setup-ClaudeMulti.bat`, que detecta la versión nueva por su cuenta (ver *Actualizaciones*). Si pasas semanas sin ejecutarlo, tus perfiles extra corren la versión vieja.
+- **La copia portable se comprueba al abrir un perfil extra y al ejecutar `Setup-ClaudeMulti.bat`.** La actualización se prepara en una carpeta temporal y solo reemplaza la copia activa después de validarla.
 - **La copia portable pierde la identidad de paquete MSIX.** En las instancias extra pueden no funcionar los deep links `claude://`, las notificaciones nativas y el auto-update. El chat, los proyectos y los MCPs sí.
 - **Permisos de `WindowsApps`.** En muchos equipos la carpeta ya es legible y no hace falta admin: el script **intenta la copia primero** y solo si falla ofrece dar lectura al grupo Administradores mediante `takeown` + `icacls`, pidiendo confirmación explícita. Es una carpeta protegida del sistema y en casos raros puede afectar las actualizaciones automáticas del paquete. Responder `N` cancela sin tocar nada.
 - **Cowork ocupa mucho disco.** La imagen de la VM (`vm_bundles`) puede pasar de 9 GB por perfil que la use. Queda fuera de los backups siempre, y *Limpiar Cache* solo la borra si lo confirmas — la app la vuelve a descargar entera la próxima vez.

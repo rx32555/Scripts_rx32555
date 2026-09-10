@@ -30,6 +30,7 @@ echo  Configurando / comprobando actualizaciones de Claude...
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
+set "SETUP_EXIT=%ERRORLEVEL%"
 
 if errorlevel 1 (
     echo.
@@ -38,4 +39,4 @@ if errorlevel 1 (
 
 echo.
 pause
-endlocal
+endlocal & exit /b %SETUP_EXIT%

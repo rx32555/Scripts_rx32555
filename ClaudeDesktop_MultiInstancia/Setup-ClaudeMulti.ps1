@@ -77,7 +77,7 @@
     .\Setup-ClaudeMulti.ps1 -Profiles 'Personal','Trabajo','Cliente' -Revert
 #>
 
-[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium', PositionalBinding = $false)]
 param(
     [string[]]$Profiles    = @('Cuenta1', 'Cuenta2', 'Cuenta3'),
     [string]  $PortableDir = 'C:\ClaudePortable',
@@ -172,7 +172,8 @@ $script:I18n = @{
         GuiBtnRestore             = 'Restaurar Backup'
         GuiBtnRevert              = 'Revertir / Eliminar Perfiles Extra'
         GuiRunning                = '==> Ejecutando configuracion para perfiles: {0}'
-        GuiRunningHint            = '    (si toca copiar Claude, la ventana quedara sin responder unos minutos)'
+        GuiRunningHint            = '    (puedes seguir viendo el progreso mientras se copia Claude)'
+        GuiBusyClose              = 'Hay una operacion en curso. Espera a que termine antes de cerrar.'
         GuiAddPrompt              = 'Ingresa el nombre de la nueva instancia:'
         GuiAddTitle               = 'Anadir Perfil'
         GuiAddDefault             = 'Trabajo'
@@ -201,6 +202,8 @@ $script:I18n = @{
         MsgNoAppx4                = '  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1'
         MsgReuseCopy              = 'Se reutilizara la copia existente.'
         MsgDeletingOldCopy        = 'Borrando copia anterior...'
+        MsgPreparingCopy          = 'Preparando copia nueva sin tocar la version actual...'
+        MsgActivatingCopy         = 'Activando la copia nueva...'
         MsgCopying                = 'Copiando {0}'
         MsgCopyingTo              = '     ->  {0}'
         MsgBadJsonKeep            = 'No se pudo leer {0} como JSON: se deja como esta.'
@@ -436,7 +439,8 @@ $script:I18n = @{
         GuiBtnRestore             = 'Restore Backup'
         GuiBtnRevert              = 'Revert / Delete Extra Profiles'
         GuiRunning                = '==> Running setup for profiles: {0}'
-        GuiRunningHint            = '    (if Claude has to be copied, the window will stop responding for a few minutes)'
+        GuiRunningHint            = '    (you can keep watching progress while Claude is copied)'
+        GuiBusyClose              = 'An operation is running. Wait for it to finish before closing.'
         GuiAddPrompt              = 'Enter the name of the new instance:'
         GuiAddTitle               = 'Add Profile'
         GuiAddDefault             = 'Work'
@@ -465,6 +469,8 @@ $script:I18n = @{
         MsgNoAppx4                = '  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup-ClaudeMulti.ps1'
         MsgReuseCopy              = 'The existing copy will be reused.'
         MsgDeletingOldCopy        = 'Deleting previous copy...'
+        MsgPreparingCopy          = 'Preparing the new copy without touching the current version...'
+        MsgActivatingCopy         = 'Activating the new copy...'
         MsgCopying                = 'Copying {0}'
         MsgCopyingTo              = '     ->  {0}'
         MsgBadJsonKeep            = 'Could not read {0} as JSON: leaving it as is.'
@@ -1103,29 +1109,71 @@ function Copy-ToPortable {
         [switch]$Overwrite
     )
 
-    if ((Test-Path $Destination) -and -not $Overwrite) {
+    $destinationExists = Test-Path -LiteralPath $Destination
+    if ($destinationExists -and -not $Overwrite) {
         Write-Note (Get-I18nStr 'MsgReuseCopy')
         return
     }
-    if (Test-Path $Destination) {
-        if ($PSCmdlet.ShouldProcess($Destination, 'Borrar copia portable anterior')) {
-            Write-Note (Get-I18nStr 'MsgDeletingOldCopy')
-            Remove-Item -LiteralPath $Destination -Recurse -Force
-        }
-    }
-
     if (-not $PSCmdlet.ShouldProcess($Destination, "Copiar Claude Desktop desde $Source")) { return }
 
+    # Construir la copia junto al destino permite intercambiar carpetas en el
+    # mismo volumen. Si robocopy falla, la version que funciona queda intacta.
+    $fullDestination = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
+    $parent = Split-Path -Parent $fullDestination
+    $leaf = Split-Path -Leaf $fullDestination
+    if ([string]::IsNullOrWhiteSpace($parent) -or [string]::IsNullOrWhiteSpace($leaf)) {
+        throw "Ruta portable no valida: $Destination"
+    }
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $token = [guid]::NewGuid().ToString('N')
+    $staging = Join-Path $parent ".$leaf.staging-$token"
+    $previous = Join-Path $parent ".$leaf.previous-$token"
+
+    Write-Note (Get-I18nStr 'MsgPreparingCopy')
     Write-Note (Get-I18nStr 'MsgCopying' @($Source))
-    Write-Note (Get-I18nStr 'MsgCopyingTo' @($Destination))
-    # /XJ: no seguir junctions ni enlaces duros, que los paquetes MSIX si usan.
-    $null = robocopy $Source $Destination /E /XJ /COPY:DAT /DCOPY:DA /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
-    $rc = $LASTEXITCODE
-    # robocopy usa 0-7 como exito (1 = se copiaron archivos). Se normaliza para
-    # que el codigo de salida del script no herede un "1" que parece error.
-    $global:LASTEXITCODE = 0
-    if ($rc -ge 8) {
-        throw (Get-I18nStr 'ErrRobocopy' @($rc))
+    Write-Note (Get-I18nStr 'MsgCopyingTo' @($staging))
+    try {
+        # /XJ: no seguir junctions ni enlaces duros, que los paquetes MSIX si usan.
+        $null = robocopy $Source $staging /E /XJ /COPY:DAT /DCOPY:DA /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+        $rc = $LASTEXITCODE
+        $global:LASTEXITCODE = 0
+        if ($rc -ge 8) { throw (Get-I18nStr 'ErrRobocopy' @($rc)) }
+
+        $candidateExe = Get-ChildItem -LiteralPath $staging -Filter 'claude.exe' -Recurse `
+                           -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $candidateExe -or $candidateExe.Length -le 0) {
+            throw (Get-I18nStr 'ErrNoClaudeExe' @($staging))
+        }
+
+        Write-Note (Get-I18nStr 'MsgActivatingCopy')
+        if ($destinationExists) {
+            Move-Item -LiteralPath $fullDestination -Destination $previous -ErrorAction Stop
+        }
+        try {
+            Move-Item -LiteralPath $staging -Destination $fullDestination -ErrorAction Stop
+        }
+        catch {
+            if ((Test-Path -LiteralPath $previous) -and -not (Test-Path -LiteralPath $fullDestination)) {
+                Move-Item -LiteralPath $previous -Destination $fullDestination -ErrorAction SilentlyContinue
+            }
+            throw
+        }
+        if (Test-Path -LiteralPath $previous) {
+            Write-Note (Get-I18nStr 'MsgDeletingOldCopy')
+            Remove-Item -LiteralPath $previous -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    finally {
+        # Solo se eliminan carpetas temporales creadas por esta invocacion.
+        foreach ($temporary in @($staging)) {
+            if ($temporary -and (Test-Path -LiteralPath $temporary) -and
+                (Split-Path -Parent $temporary) -eq $parent -and
+                (Split-Path -Leaf $temporary) -like ".$leaf.*-$token") {
+                Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 
@@ -1402,6 +1450,7 @@ function Get-InstalledVersion {
     if ($cfg.mode -eq 'Msix') {
         $pkg = Get-AppxPackage -ErrorAction SilentlyContinue |
                Where-Object { $_.Name -match 'Claude' -or $_.Publisher -match 'Anthropic' } |
+               Sort-Object -Property @{ Expression = { [version]$_.Version } } -Descending |
                Select-Object -First 1
         if ($pkg) { return [string]$pkg.Version }
         return $null
@@ -1437,7 +1486,7 @@ elseif ($cfg.mode -eq 'Msix') {
         try { $stampVer = (Get-Content -LiteralPath $stampFile -Raw | ConvertFrom-Json).version } catch { }
     }
     $installed = Get-InstalledVersion
-    if ($installed -and $stampVer -and $installed -ne $stampVer) { $update = $true }
+    if ($installed -and $installed -ne $stampVer) { $update = $true }
 }
 
 if ($update -and (Test-PortableBusy)) {
@@ -1448,20 +1497,34 @@ if ($update -and (Test-PortableBusy)) {
 if ($update) {
     $setup = Join-Path $base 'Setup-ClaudeMulti.ps1'
     if (Test-Path -LiteralPath $setup) {
-        # Start-Process une los argumentos con espacios y NO los entrecomilla:
-        # hay que citar a mano o una ruta como "C:\Users\A Nombre\..." se parte.
-        $names = @($cfg.profiles | ForEach-Object { '"' + $_.name + '"' })
-        $argv  = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$setup`"", '-Profiles') + $names
+        # -File no transporta arrays: los nombres sobrantes podian enlazarse
+        # a RemoveProfile. Serializar datos y usar splatting dentro del hijo.
+        $setupParams = @{ Profiles = @($cfg.profiles | ForEach-Object { $_.name }) }
         # Sin esto la actualizacion recopiaria al PortableDir por defecto y
         # dejaria dos copias, con el config apuntando a la equivocada.
-        if ($cfg.portableDir) { $argv += @('-PortableDir', "`"$($cfg.portableDir)`"") }
-        if ($cfg.copyMcp)     { $argv += '-CopyMcpConfig' }
+        if ($cfg.portableDir) { $setupParams.PortableDir = $cfg.portableDir }
+        if ($cfg.copyMcp)     { $setupParams.CopyMcpConfig = $true }
         if ($cfg.sharedMemory) {
-            $argv += '-SharedMemory'
-            if ($cfg.sharedDir) { $argv += @('-SharedDir', "`"$($cfg.sharedDir)`"") }
+            $setupParams.SharedMemory = $true
+            if ($cfg.sharedDir) { $setupParams.SharedDir = $cfg.sharedDir }
         }
-        # Ventana visible: la copia tarda y el usuario debe ver que pasa algo.
-        Start-Process 'powershell.exe' -ArgumentList $argv -Wait
+        $payload = @{ Setup = $setup; Parameters = $setupParams } | ConvertTo-Json -Depth 8 -Compress
+        $encodedPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
+        $command = @"
+`$ErrorActionPreference = 'Stop'
+`$ProgressPreference = 'SilentlyContinue'
+`$payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedPayload')) | ConvertFrom-Json
+`$parameters = @{}
+foreach (`$property in `$payload.Parameters.PSObject.Properties) { `$parameters[`$property.Name] = `$property.Value }
+& `$payload.Setup @parameters
+"@
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        # La comprobacion normal es invisible; si hay una actualizacion, esta
+        # ventana muestra el progreso de la copia y se cierra al terminar.
+        $child = Start-Process 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) -WindowStyle Normal -Wait -PassThru
+        if ($child.ExitCode -ne 0) {
+            Show-Error 'No se pudo actualizar Claude. Ejecuta Setup-ClaudeMulti.bat para revisar el error.'
+        }
         try {
             $cfg  = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
             $prof = $cfg.profiles | Where-Object { $_.name -eq $ProfileName } | Select-Object -First 1
@@ -1616,7 +1679,7 @@ function Remove-SingleProfile {
         return $false
     }
 
-    if (-not $SkipConfirm -and -not $KeepData -and (Test-Path -LiteralPath $dataDir)) {
+    if (-not $WhatIfPreference -and -not $SkipConfirm -and -not $KeepData -and (Test-Path -LiteralPath $dataDir)) {
         $go = $false
         try {
             $go = $PSCmdlet.ShouldContinue(
@@ -2444,6 +2507,7 @@ function Show-InputDialog {
 }
 
 function Invoke-MultiSetup {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [string[]]$TargetProfiles,
         [string]$TargetPortableDir = $PortableDir,
@@ -2980,9 +3044,7 @@ function Show-GuiWindow {
 
     $script:GuiLogger = { param($msg) Append-GuiLog $msg }
 
-    # La copia portable corre en el hilo de UI y puede tardar minutos. No se
-    # puede evitar el bloqueo sin runspaces, pero al menos se ve que trabaja
-    # y no se aceptan clics que reentrarian en la misma operacion.
+    # Los botones que modifican estado se deshabilitan mientras trabaja el hijo.
     $allButtons = @($btnRun, $btnAdd, $btnNote, $btnHealth, $btnCache, $btnBackup, $btnRestore, $btnRemove, $btnRevert)
     function Set-GuiBusy {
         param([bool]$Busy)
@@ -2990,6 +3052,127 @@ function Show-GuiWindow {
         $form.Cursor = $(if ($Busy) { [System.Windows.Forms.Cursors]::WaitCursor }
                          else       { [System.Windows.Forms.Cursors]::Default })
         [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    function Start-GuiSetupJob {
+        param(
+            [Parameter(Mandatory)][string[]]$TargetProfiles,
+            [switch]$CopyMcp,
+            [switch]$SharedMem,
+            [string]$SetupPath = $PSCommandPath
+        )
+
+        if ($script:GuiSetupJob) { return }
+        if (-not $setupPath -or -not (Test-Path -LiteralPath $setupPath)) {
+            Append-GuiLog '    [X]    No se pudo localizar Setup-ClaudeMulti.ps1.'
+            return
+        }
+
+        $parameters = @{
+            Profiles    = @($TargetProfiles)
+            PortableDir = $PortableDir
+            Language    = $script:Lang
+        }
+        if ($CopyMcp)                { $parameters.CopyMcpConfig = $true }
+        if ($SharedMem)              { $parameters.SharedMemory = $true; $parameters.SharedDir = $SharedDir }
+        if ($NoLauncher)             { $parameters.NoLauncher = $true }
+        if ($GrantWindowsAppsRead)   { $parameters.GrantWindowsAppsRead = $true }
+        if ($Force)                  { $parameters.Force = $true }
+
+        $payload = @{ Setup = $setupPath; Parameters = $parameters } | ConvertTo-Json -Depth 8 -Compress
+        $encodedPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
+        $command = @"
+`$ErrorActionPreference = 'Stop'
+`$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding(`$false)
+`$payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedPayload')) | ConvertFrom-Json
+`$parameters = @{}
+foreach (`$property in `$payload.Parameters.PSObject.Properties) { `$parameters[`$property.Name] = `$property.Value }
+& `$payload.Setup @parameters
+"@
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        $token = [guid]::NewGuid().ToString('N')
+        $outFile = Join-Path ([IO.Path]::GetTempPath()) "ClaudeMulti-gui-$token.out.log"
+        $errFile = Join-Path ([IO.Path]::GetTempPath()) "ClaudeMulti-gui-$token.err.log"
+
+        try {
+            Set-GuiBusy $true
+            $process = Start-Process 'powershell.exe' `
+                         -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) `
+                         -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru
+        }
+        catch {
+            Set-GuiBusy $false
+            Append-GuiLog "    [X]    $($_.Exception.Message)"
+            return
+        }
+
+        $state = [pscustomobject]@{
+            Process = $process; OutFile = $outFile; ErrFile = $errFile
+            OutLength = 0; ErrLength = 0; TextBox = $txtLog
+            OnComplete = { Set-GuiBusy $false; Refresh-ProfileList }.GetNewClosure()
+        }
+        $script:GuiSetupJob = $state
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 250
+        $script:GuiSetupTimer = $timer
+
+        $timer.Add_Tick({
+            $job = $script:GuiSetupJob
+            if (-not $job) { return }
+            foreach ($stream in @('Out', 'Err')) {
+                $fileProp = "${stream}File"
+                $lenProp  = "${stream}Length"
+                $file = $job.$fileProp
+                if (Test-Path -LiteralPath $file) {
+                    try {
+                        $content = [IO.File]::ReadAllText($file, [Text.Encoding]::UTF8)
+                        $seen = [int]$job.$lenProp
+                        if ($content.Length -gt $seen) {
+                            $chunk = $content.Substring($seen)
+                            $job.TextBox.AppendText($chunk.Replace("`r`n", "`n").Replace("`n", "`r`n"))
+                            $job.TextBox.SelectionStart = $job.TextBox.Text.Length
+                            $job.TextBox.ScrollToCaret()
+                            $job.$lenProp = $content.Length
+                        }
+                    } catch { }
+                }
+            }
+
+            if ($job.Process.HasExited) {
+                # Una ultima vuelta recoge bytes escritos justo antes de salir.
+                foreach ($stream in @('Out', 'Err')) {
+                    $fileProp = "${stream}File"
+                    $lenProp  = "${stream}Length"
+                    $file = $job.$fileProp
+                    if (Test-Path -LiteralPath $file) {
+                        try {
+                            $content = [IO.File]::ReadAllText($file, [Text.Encoding]::UTF8)
+                            $seen = [int]$job.$lenProp
+                            if ($content.Length -gt $seen) {
+                                $chunk = $content.Substring($seen)
+                                $job.TextBox.AppendText($chunk.Replace("`r`n", "`n").Replace("`n", "`r`n"))
+                            }
+                        } catch { }
+                    }
+                }
+                $exitCode = $job.Process.ExitCode
+                $job.Process.Dispose()
+                $script:GuiSetupTimer.Stop()
+                $script:GuiSetupTimer.Dispose()
+                foreach ($file in @($job.OutFile, $job.ErrFile)) {
+                    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+                }
+                if ($exitCode -ne 0) {
+                    $job.TextBox.AppendText("    [X]    PowerShell termino con codigo $exitCode.`r`n")
+                }
+                $onComplete = $job.OnComplete
+                $script:GuiSetupJob = $null
+                $script:GuiSetupTimer = $null
+                & $onComplete
+            }
+        })
+        $timer.Start()
     }
 
     $btnRun.Add_Click({
@@ -3000,13 +3183,7 @@ function Show-GuiWindow {
         if ($profs.Count -eq 0) { $profs = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
         Append-GuiLog (Get-I18nStr 'GuiRunning' @($profs -join ', '))
         Append-GuiLog (Get-I18nStr 'GuiRunningHint')
-        Set-GuiBusy $true
-        try {
-            [void](Invoke-MultiSetup -TargetProfiles $profs -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
-        }
-        catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
-        finally { Set-GuiBusy $false }
-        Refresh-ProfileList
+        Start-GuiSetupJob -TargetProfiles $profs -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn
     })
 
     $btnAdd.Add_Click({
@@ -3022,13 +3199,7 @@ function Show-GuiWindow {
                 $script:SharedMemoryOn = $chkShared.Checked
                 $txtLog.Clear()
                 Append-GuiLog (Get-I18nStr 'GuiAdding' @($newName))
-                Set-GuiBusy $true
-                try {
-                    [void](Invoke-MultiSetup -TargetProfiles $newList -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
-                }
-                catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
-                finally { Set-GuiBusy $false }
-                Refresh-ProfileList
+                Start-GuiSetupJob -TargetProfiles $newList -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn
             }
         }
     })
@@ -3065,13 +3236,7 @@ function Show-GuiWindow {
             Append-GuiLog (Get-I18nStr 'GuiRebuilding')
             $profsToUpdate = Get-ConfiguredProfiles
             if ($profsToUpdate.Count -eq 0) { $profsToUpdate = @('Cuenta1', 'Cuenta2', 'Cuenta3') }
-            Set-GuiBusy $true
-            try {
-                [void](Invoke-MultiSetup -TargetProfiles $profsToUpdate -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
-            }
-            catch { Append-GuiLog "    [X]    $($_.Exception.Message)" }
-            finally { Set-GuiBusy $false }
-            Refresh-ProfileList
+            Start-GuiSetupJob -TargetProfiles $profsToUpdate -CopyMcp:$script:CopyMcpConfig -SharedMem:$script:SharedMemoryOn
         }
     })
 
@@ -3157,6 +3322,15 @@ function Show-GuiWindow {
         }
     })
 
+    $form.Add_FormClosing({
+        param($sender, $eventArgs)
+        if ($script:GuiSetupJob) {
+            $eventArgs.Cancel = $true
+            [void][System.Windows.Forms.MessageBox]::Show(
+                (Get-I18nStr 'GuiBusyClose'), (Get-I18nStr 'GuiTitle'), 'OK', 'Information')
+        }
+    })
+
     [void]$form.ShowDialog()
     $script:GuiLogger = $null
 }
@@ -3177,6 +3351,9 @@ if (Test-Path -LiteralPath $savedCfgFile) {
     try { $savedCfg = Get-Content -LiteralPath $savedCfgFile -Raw | ConvertFrom-Json } catch { }
 }
 if ($savedCfg) {
+    if ($savedCfg.portableDir -and -not $PSBoundParameters.ContainsKey('PortableDir')) {
+        $PortableDir = $savedCfg.portableDir
+    }
     if ($savedCfg.sharedMemory -and -not $PSBoundParameters.ContainsKey('SharedMemory')) {
         $script:SharedMemoryOn = $true
     }
@@ -3234,5 +3411,5 @@ if ($Revert) {
     exit 0
 }
 
-[void](Invoke-MultiSetup -TargetProfiles $Profiles -TargetPortableDir $PortableDir -CopyMcp:$CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force)
-exit 0
+$setupSucceeded = Invoke-MultiSetup -TargetProfiles $Profiles -TargetPortableDir $PortableDir -CopyMcp:$CopyMcpConfig -SharedMem:$script:SharedMemoryOn -TargetSharedDir $SharedDir -NoLaunch:$NoLauncher -GrantRead:$GrantWindowsAppsRead -ForceRecopy:$Force
+exit $(if ($setupSucceeded -eq $true) { 0 } else { 1 })
