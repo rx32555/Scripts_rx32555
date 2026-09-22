@@ -171,6 +171,10 @@ $script:I18n = @{
         GuiBtnBackup              = 'Crear Backup (.zip)'
         GuiBtnRestore             = 'Restaurar Backup'
         GuiBtnRevert              = 'Revertir / Eliminar Perfiles Extra'
+        GuiBtnLog                 = 'Ver registro de la ultima ejecucion'
+        LogSaved                  = 'Registro de esta ejecucion: {0}'
+        LogMissing                = 'Todavia no hay ningun registro guardado en {0}.'
+        LogChildFailed            = 'La configuracion termino con errores (codigo {0}). Revisa el registro.'
         GuiRunning                = '==> Ejecutando configuracion para perfiles: {0}'
         GuiRunningHint            = '    (puedes seguir viendo el progreso mientras se copia Claude)'
         GuiBusyClose              = 'Hay una operacion en curso. Espera a que termine antes de cerrar.'
@@ -438,6 +442,10 @@ $script:I18n = @{
         GuiBtnBackup              = 'Create Backup (.zip)'
         GuiBtnRestore             = 'Restore Backup'
         GuiBtnRevert              = 'Revert / Delete Extra Profiles'
+        GuiBtnLog                 = 'View last run log'
+        LogSaved                  = 'Log of this run: {0}'
+        LogMissing                = 'No log has been saved yet at {0}.'
+        LogChildFailed            = 'Setup finished with errors (exit code {0}). Check the log.'
         GuiRunning                = '==> Running setup for profiles: {0}'
         GuiRunningHint            = '    (you can keep watching progress while Claude is copied)'
         GuiBusyClose              = 'An operation is running. Wait for it to finish before closing.'
@@ -671,11 +679,86 @@ function Get-I18nStr {
 
 $script:GuiLogger = $null
 
-function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan; if ($script:GuiLogger) { & $script:GuiLogger "`r`n==> $m" } }
-function Write-Ok   { param([string]$m) Write-Host "    [ok]   $m" -ForegroundColor Green; if ($script:GuiLogger) { & $script:GuiLogger "    [ok]   $m" } }
-function Write-Note { param([string]$m) Write-Host "    ->     $m" -ForegroundColor Gray; if ($script:GuiLogger) { & $script:GuiLogger "    ->     $m" } }
-function Write-Warn { param([string]$m) Write-Host "    [!]    $m" -ForegroundColor Yellow; if ($script:GuiLogger) { & $script:GuiLogger "    [!]    $m" } }
-function Write-Err  { param([string]$m) Write-Host "    [X]    $m" -ForegroundColor Red; if ($script:GuiLogger) { & $script:GuiLogger "    [X]    $m" } }
+function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan; if ($script:GuiLogger) { & $script:GuiLogger "`r`n==> $m" }; Write-RunLog "==> $m" }
+function Write-Ok   { param([string]$m) Write-Host "    [ok]   $m" -ForegroundColor Green; if ($script:GuiLogger) { & $script:GuiLogger "    [ok]   $m" }; Write-RunLog "[ok]   $m" }
+function Write-Note { param([string]$m) Write-Host "    ->     $m" -ForegroundColor Gray; if ($script:GuiLogger) { & $script:GuiLogger "    ->     $m" }; Write-RunLog "->     $m" }
+function Write-Warn { param([string]$m) Write-Host "    [!]    $m" -ForegroundColor Yellow; if ($script:GuiLogger) { & $script:GuiLogger "    [!]    $m" }; Write-RunLog "[!]    $m" }
+function Write-Err  { param([string]$m) Write-Host "    [X]    $m" -ForegroundColor Red; if ($script:GuiLogger) { & $script:GuiLogger "    [X]    $m" }; Write-RunLog "[X]    $m" }
+
+# --- Registro de la ultima ejecucion ----------------------------------------
+# Todo lo que sale por los ayudantes de arriba se copia a
+# %APPDATA%\ClaudeMulti\last-run.log. El archivo se reescribe en cada ejecucion:
+# guarda "que paso la ultima vez", no un historial que crezca sin limite.
+$script:LogFile = $null
+
+function Get-RunLogPath { Join-Path (Join-Path $env:APPDATA 'ClaudeMulti') 'last-run.log' }
+
+function Write-RunLog {
+    param([string]$Line)
+    if (-not $script:LogFile) { return }
+    # El registro nunca debe tumbar la ejecucion: si falla, se sigue sin el.
+    try {
+        $stamp = (Get-Date).ToString('HH:mm:ss')
+        [IO.File]::AppendAllText($script:LogFile, "[$stamp] $Line`r`n",
+                                 (New-Object Text.UTF8Encoding($false)))
+    }
+    catch { }
+}
+
+function Start-RunLog {
+    param([string]$Mode = '')
+
+    try {
+        $logPath = Get-RunLogPath
+        $logDir  = Split-Path -Parent $logPath
+        # Con .NET y no New-Item: el registro se escribe igual bajo -WhatIf,
+        # que simula los cambios del usuario, no la traza de lo ocurrido.
+        [void][IO.Directory]::CreateDirectory($logDir)
+        $header = @(
+            '============================================================='
+            "  Claude Desktop - Multi Instancia"
+            '============================================================='
+            "Fecha   : $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+            "Usuario : $env:USERNAME@$env:COMPUTERNAME"
+            "Modo    : $Mode"
+            "PID     : $PID"
+            "Script  : $PSCommandPath"
+            ''
+        ) -join "`r`n"
+        [IO.File]::WriteAllText($logPath, "$header`r`n", (New-Object Text.UTF8Encoding($false)))
+        $script:LogFile = $logPath
+    }
+    catch { $script:LogFile = $null }
+}
+
+# El hijo de la interfaz escribe en stderr en formato CLIXML (Windows PowerShell
+# serializa ahi todos los flujos cuando el error va a un archivo). Volcarlo tal
+# cual llenaba el panel de XML y de _x000D_, asi que se extrae solo el texto de
+# los registros de error de verdad; el resto ya llego por la salida estandar.
+function ConvertFrom-ChildErrorText {
+    param([string]$Raw)
+
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return '' }
+    $marker = $Raw.IndexOf('#< CLIXML')
+    $start  = $Raw.IndexOf('<Objs')
+    if ($marker -lt 0 -or $start -lt 0) { return $Raw.Trim() }
+
+    # Lo que una herramienta nativa haya escrito antes del CLIXML es texto plano.
+    $plain = $Raw.Substring(0, $marker).Trim()
+
+    try {
+        $xml = [xml]$Raw.Substring($start)
+        $ns = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
+        $ns.AddNamespace('p', 'http://schemas.microsoft.com/powershell/2004/04')
+        $parts = @($xml.SelectNodes("//p:S[@S='Error']", $ns) | ForEach-Object { $_.InnerText })
+        $text = ($parts -join '')
+        # CLIXML escapa los caracteres de control como _x000D_ / _x000A_.
+        $text = [regex]::Replace($text, '_x([0-9A-Fa-f]{4})_',
+                    { param($m) [string][char][Convert]::ToInt32($m.Groups[1].Value, 16) })
+        return (@($plain, $text.Trim()) | Where-Object { $_ }) -join "`r`n"
+    }
+    catch { return $plain }
+}
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -2858,6 +2941,8 @@ function Invoke-MultiSetup {
     $tableStr = $created | Format-Table -AutoSize | Out-String
     Write-Host $tableStr
     if ($script:GuiLogger) { & $script:GuiLogger $tableStr }
+    Write-RunLog $tableStr.Trim()
+    if ($script:LogFile) { Write-Note (Get-I18nStr 'LogSaved' @($script:LogFile)) }
 
     return $true
 }
@@ -2868,7 +2953,7 @@ function Show-GuiWindow {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = (Get-I18nStr 'GuiTitle')
-    $form.Size = New-Object System.Drawing.Size(760, 648)
+    $form.Size = New-Object System.Drawing.Size(760, 690)
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
@@ -3034,6 +3119,15 @@ function Show-GuiWindow {
     $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(0, 255, 100)
     [void]$form.Controls.Add($txtLog)
 
+    $btnLog = New-Object System.Windows.Forms.Button
+    $btnLog.Location = New-Object System.Drawing.Point(15, 596)
+    $btnLog.Size = New-Object System.Drawing.Size(280, 28)
+    $btnLog.Text = (Get-I18nStr 'GuiBtnLog')
+    $btnLog.Font = $fontNorm
+    $btnLog.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 65)
+    $btnLog.FlatStyle = 'Flat'
+    [void]$form.Controls.Add($btnLog)
+
     function Append-GuiLog {
         param([string]$Message)
         $txtLog.AppendText("$Message`r`n")
@@ -3081,6 +3175,14 @@ function Show-GuiWindow {
 
         $payload = @{ Setup = $setupPath; Parameters = $parameters } | ConvertTo-Json -Depth 8 -Compress
         $encodedPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
+        $token = [guid]::NewGuid().ToString('N')
+        $outFile  = Join-Path ([IO.Path]::GetTempPath()) "ClaudeMulti-gui-$token.out.log"
+        $errFile  = Join-Path ([IO.Path]::GetTempPath()) "ClaudeMulti-gui-$token.err.log"
+        # El hijo deja su codigo de salida en un archivo: el objeto devuelto por
+        # Start-Process -PassThru no siempre expone ExitCode, y leerlo vacio hacia
+        # que la interfaz anunciara un fallo inexistente.
+        $codeFile = Join-Path ([IO.Path]::GetTempPath()) "ClaudeMulti-gui-$token.code.txt"
+
         $command = @"
 `$ErrorActionPreference = 'Stop'
 `$ProgressPreference = 'SilentlyContinue'
@@ -3088,12 +3190,17 @@ function Show-GuiWindow {
 `$payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedPayload')) | ConvertFrom-Json
 `$parameters = @{}
 foreach (`$property in `$payload.Parameters.PSObject.Properties) { `$parameters[`$property.Name] = `$property.Value }
-& `$payload.Setup @parameters
+`$code = 1
+try {
+    & `$payload.Setup @parameters
+    `$code = `$(if (`$null -ne `$LASTEXITCODE) { `$LASTEXITCODE } else { 0 })
+}
+finally {
+    [IO.File]::WriteAllText('$codeFile', [string]`$code)
+}
+exit `$code
 "@
         $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-        $token = [guid]::NewGuid().ToString('N')
-        $outFile = Join-Path ([IO.Path]::GetTempPath()) "ClaudeMulti-gui-$token.out.log"
-        $errFile = Join-Path ([IO.Path]::GetTempPath()) "ClaudeMulti-gui-$token.err.log"
 
         try {
             Set-GuiBusy $true
@@ -3108,9 +3215,8 @@ foreach (`$property in `$payload.Parameters.PSObject.Properties) { `$parameters[
         }
 
         $state = [pscustomobject]@{
-            Process = $process; OutFile = $outFile; ErrFile = $errFile
-            OutLength = 0; ErrLength = 0; TextBox = $txtLog
-            OnComplete = { Set-GuiBusy $false; Refresh-ProfileList }.GetNewClosure()
+            Process = $process; OutFile = $outFile; ErrFile = $errFile; CodeFile = $codeFile
+            OutLength = 0; TextBox = $txtLog
         }
         $script:GuiSetupJob = $state
         $timer = New-Object System.Windows.Forms.Timer
@@ -3120,56 +3226,79 @@ foreach (`$property in `$payload.Parameters.PSObject.Properties) { `$parameters[
         $timer.Add_Tick({
             $job = $script:GuiSetupJob
             if (-not $job) { return }
-            foreach ($stream in @('Out', 'Err')) {
-                $fileProp = "${stream}File"
-                $lenProp  = "${stream}Length"
-                $file = $job.$fileProp
-                if (Test-Path -LiteralPath $file) {
-                    try {
-                        $content = [IO.File]::ReadAllText($file, [Text.Encoding]::UTF8)
-                        $seen = [int]$job.$lenProp
-                        if ($content.Length -gt $seen) {
-                            $chunk = $content.Substring($seen)
-                            $job.TextBox.AppendText($chunk.Replace("`r`n", "`n").Replace("`n", "`r`n"))
-                            $job.TextBox.SelectionStart = $job.TextBox.Text.Length
-                            $job.TextBox.ScrollToCaret()
-                            $job.$lenProp = $content.Length
-                        }
-                    } catch { }
-                }
+            # Solo se emite en vivo la salida estandar: el archivo de errores es
+            # CLIXML y hay que leerlo entero, asi que se procesa al terminar.
+            if (Test-Path -LiteralPath $job.OutFile) {
+                try {
+                    $content = [IO.File]::ReadAllText($job.OutFile, [Text.Encoding]::UTF8)
+                    $seen = [int]$job.OutLength
+                    if ($content.Length -gt $seen) {
+                        $chunk = $content.Substring($seen)
+                        $job.TextBox.AppendText($chunk.Replace("`r`n", "`n").Replace("`n", "`r`n"))
+                        $job.TextBox.SelectionStart = $job.TextBox.Text.Length
+                        $job.TextBox.ScrollToCaret()
+                        $job.OutLength = $content.Length
+                    }
+                } catch { }
             }
 
             if ($job.Process.HasExited) {
+                # WaitForExit() sin argumentos espera ademas al volcado de los
+                # flujos redirigidos: sin el, ExitCode puede llegar vacio.
+                try { $job.Process.WaitForExit() } catch { }
+
                 # Una ultima vuelta recoge bytes escritos justo antes de salir.
-                foreach ($stream in @('Out', 'Err')) {
-                    $fileProp = "${stream}File"
-                    $lenProp  = "${stream}Length"
-                    $file = $job.$fileProp
-                    if (Test-Path -LiteralPath $file) {
-                        try {
-                            $content = [IO.File]::ReadAllText($file, [Text.Encoding]::UTF8)
-                            $seen = [int]$job.$lenProp
-                            if ($content.Length -gt $seen) {
-                                $chunk = $content.Substring($seen)
-                                $job.TextBox.AppendText($chunk.Replace("`r`n", "`n").Replace("`n", "`r`n"))
-                            }
-                        } catch { }
-                    }
+                if (Test-Path -LiteralPath $job.OutFile) {
+                    try {
+                        $content = [IO.File]::ReadAllText($job.OutFile, [Text.Encoding]::UTF8)
+                        $seen = [int]$job.OutLength
+                        if ($content.Length -gt $seen) {
+                            $job.TextBox.AppendText($content.Substring($seen).Replace("`r`n", "`n").Replace("`n", "`r`n"))
+                        }
+                    } catch { }
                 }
-                $exitCode = $job.Process.ExitCode
+                $errText = ''
+                if (Test-Path -LiteralPath $job.ErrFile) {
+                    try {
+                        $errText = ConvertFrom-ChildErrorText ([IO.File]::ReadAllText($job.ErrFile, [Text.Encoding]::UTF8))
+                    } catch { }
+                }
+                if ($errText) { $job.TextBox.AppendText("    [X]    $errText`r`n") }
+
+                $exitCode = $null
+                if (Test-Path -LiteralPath $job.CodeFile) {
+                    try {
+                        $raw = ([IO.File]::ReadAllText($job.CodeFile)).Trim()
+                        $parsed = 0
+                        if ([int]::TryParse($raw, [ref]$parsed)) { $exitCode = $parsed }
+                    } catch { }
+                }
+                if ($null -eq $exitCode) {
+                    try { if ($null -ne $job.Process.ExitCode) { $exitCode = [int]$job.Process.ExitCode } } catch { }
+                }
                 $job.Process.Dispose()
                 $script:GuiSetupTimer.Stop()
                 $script:GuiSetupTimer.Dispose()
-                foreach ($file in @($job.OutFile, $job.ErrFile)) {
+                foreach ($file in @($job.OutFile, $job.ErrFile, $job.CodeFile)) {
                     Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
                 }
-                if ($exitCode -ne 0) {
-                    $job.TextBox.AppendText("    [X]    PowerShell termino con codigo $exitCode.`r`n")
+                # Si fue bien, la propia instancia hija ya anuncio la ruta del
+                # registro; aqui solo se recuerda cuando algo termino mal.
+                if ($errText -or ($null -ne $exitCode -and $exitCode -ne 0)) {
+                    if ($null -ne $exitCode -and $exitCode -ne 0) {
+                        $job.TextBox.AppendText("    [X]    $(Get-I18nStr 'LogChildFailed' @($exitCode))`r`n")
+                    }
+                    $job.TextBox.AppendText("    ->     $(Get-I18nStr 'LogSaved' @((Get-RunLogPath)))`r`n")
                 }
-                $onComplete = $job.OnComplete
+                $job.TextBox.SelectionStart = $job.TextBox.Text.Length
+                $job.TextBox.ScrollToCaret()
                 $script:GuiSetupJob = $null
                 $script:GuiSetupTimer = $null
-                & $onComplete
+                # Se llama directo. Un closure aqui (ver tests/GuiScope.Tests.ps1)
+                # colgaria el bloque del ambito del modulo y dejaria de ver estas
+                # funciones, que son locales de Show-Gui.
+                Set-GuiBusy $false
+                Refresh-ProfileList
             }
         })
         $timer.Start()
@@ -3310,6 +3439,16 @@ foreach (`$property in `$payload.Parameters.PSObject.Properties) { `$parameters[
         Refresh-ProfileList
     })
 
+    $btnLog.Add_Click({
+        $logPath = Get-RunLogPath
+        if (Test-Path -LiteralPath $logPath) {
+            Start-Process 'notepad.exe' -ArgumentList $logPath
+        } else {
+            [void][System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'LogMissing' @($logPath)),
+                (Get-I18nStr 'GuiTitle'), 'OK', 'Information')
+        }
+    })
+
     $btnRevert.Add_Click({
         $res = [System.Windows.Forms.MessageBox]::Show((Get-I18nStr 'GuiConfirmRevert'), (Get-I18nStr 'GuiConfirmRevertTitle'), 'YesNo', 'Warning')
         if ($res -eq 'Yes') {
@@ -3336,6 +3475,14 @@ foreach (`$property in `$payload.Parameters.PSObject.Properties) { `$parameters[
 }
 
 # ------------------------------------------------------------------- main ---
+
+# Cada ejecucion reescribe el registro: la interfaz lo abre con su boton y la
+# instancia hija (la que hace el trabajo real) lo vuelve a empezar al arrancar.
+$runMode = 'interactivo'
+if ($PSBoundParameters.ContainsKey('Profiles')) { $runMode = "perfiles: $($Profiles -join ', ')" }
+elseif ($RemoveProfile)                         { $runMode = "eliminar perfil: $($RemoveProfile -join ', ')" }
+elseif ($Revert)                                { $runMode = 'revertir' }
+Start-RunLog -Mode $runMode
 
 Write-Host ''
 Write-Host '=============================================================' -ForegroundColor White

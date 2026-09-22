@@ -16,7 +16,16 @@ Para verificar las regresiones sin modificar perfiles:
 powershell.exe -NoProfile -File .\tests\Launcher.Tests.ps1
 powershell.exe -NoProfile -File .\tests\PortableCopy.Tests.ps1
 powershell.exe -NoProfile -STA -File .\tests\GuiBackground.Tests.ps1
+powershell.exe -NoProfile -STA -File .\tests\GuiScope.Tests.ps1
+powershell.exe -NoProfile -File .\tests\RunLog.Tests.ps1
 ```
+
+### Registro de la ultima ejecucion
+
+Cada ejecucion escribe `%APPDATA%\ClaudeMulti\last-run.log` con la fecha, el
+modo de invocacion y todas las lineas que aparecen en pantalla. El archivo se
+reemplaza en cada corrida: guarda lo que paso la ultima vez, no un historial.
+La interfaz lo abre con el boton **Ver registro de la ultima ejecucion**.
 
 Script de PowerShell para correr **tres o más instancias de Claude Desktop en paralelo** en el mismo PC, cada una con su propia cuenta, sesión, historial local, MCPs y configuración.
 
