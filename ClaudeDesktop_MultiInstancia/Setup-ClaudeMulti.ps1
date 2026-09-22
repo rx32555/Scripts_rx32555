@@ -299,9 +299,9 @@ $script:I18n = @{
         MsgPortableIncomplete     = 'La copia portable esta incompleta o movida: se rehace.'
         MsgPortableNoStamp        = 'Hay una copia portable sin sello de version: se rehace para poder controlarla.'
         MsgPortableBusy           = 'Hay {0} proceso(s) de Claude corriendo desde {1}.'
-        MsgCannotReplace          = 'No se puede reemplazar la copia mientras esten abiertos.'
-        MsgCloseAndRetry          = 'Cierra esas ventanas de Claude y vuelve a intentar.'
-        MsgKeepUsingCurrent       = 'Por ahora se sigue usando la copia actual.'
+        MsgStoppingPortable       = 'Cerrando instancias de la copia portable para actualizarla...'
+        MsgStopPortableFailed     = 'No se pudo cerrar el proceso {0}: {1}'
+        MsgPortableStillBusy      = 'No se pudieron cerrar todas las instancias de {0}. La copia portable no se reemplazo.'
         MsgUpdateFailedBusy       = 'La actualizacion fallo: hay Claude abierto desde la copia portable.'
         MsgCloseAllAndRetry       = 'Cierra todas las ventanas de Claude y vuelve a intentar.'
         MsgCopyFailedPerms        = 'La copia fallo por los permisos restrictivos de WindowsApps.'
@@ -570,9 +570,9 @@ $script:I18n = @{
         MsgPortableIncomplete     = 'The portable copy is incomplete or moved: it will be remade.'
         MsgPortableNoStamp        = 'There is a portable copy with no version stamp: it will be remade so it can be tracked.'
         MsgPortableBusy           = 'There are {0} Claude process(es) running from {1}.'
-        MsgCannotReplace          = 'The copy cannot be replaced while they are open.'
-        MsgCloseAndRetry          = 'Close those Claude windows and try again.'
-        MsgKeepUsingCurrent       = 'For now the current copy keeps being used.'
+        MsgStoppingPortable       = 'Closing portable instances to update the copy...'
+        MsgStopPortableFailed     = 'Could not close process {0}: {1}'
+        MsgPortableStillBusy      = 'Some instances from {0} could not be closed. The portable copy was not replaced.'
         MsgUpdateFailedBusy       = 'The update failed: Claude is open from the portable copy.'
         MsgCloseAllAndRetry       = 'Close all Claude windows and try again.'
         MsgCopyFailedPerms        = 'The copy failed because of the restrictive WindowsApps permissions.'
@@ -1014,7 +1014,7 @@ function Get-PortableStamp {
     catch { return $null }
 }
 
-# Procesos corriendo desde la copia portable: bloquearian el borrado al actualizar.
+# Procesos corriendo desde la copia portable que deben cerrarse antes de actualizar.
 function Get-PortableProcess {
     param([Parameter(Mandatory)][string]$PortablePath)
 
@@ -1023,6 +1023,31 @@ function Get-PortableProcess {
         try { $_.Path -and $_.Path.StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }
         catch { $false }
     }
+}
+
+function Stop-PortableProcesses {
+    param([Parameter(Mandatory)][string]$PortablePath)
+
+    if ($WhatIfPreference) { return $true }
+    $running = @(Get-PortableProcess -PortablePath $PortablePath)
+    if ($running.Count -eq 0) { return $true }
+    Write-Warn (Get-I18nStr 'MsgPortableBusy' @($running.Count, $PortablePath))
+    Write-Note (Get-I18nStr 'MsgStoppingPortable')
+    foreach ($process in $running) {
+        try { Stop-Process -Id $process.Id -Force -ErrorAction Stop }
+        catch { Write-Warn (Get-I18nStr 'MsgStopPortableFailed' @($process.Id, $_.Exception.Message)) }
+    }
+
+    # Los procesos Electron pueden tardar en liberar los archivos tras Stop-Process.
+    $deadline = (Get-Date).AddSeconds(2)
+    do {
+        $remaining = @(Get-PortableProcess -PortablePath $PortablePath)
+        if ($remaining.Count -eq 0) { return $true }
+        Start-Sleep -Milliseconds 200
+    } while ((Get-Date) -lt $deadline)
+
+    Write-Err (Get-I18nStr 'MsgPortableStillBusy' @($PortablePath))
+    return $false
 }
 
 function Set-PortableStamp {
@@ -1538,21 +1563,37 @@ function Get-InstalledVersion {
         if ($pkg) { return [string]$pkg.Version }
         return $null
     }
+    # Direct/Squirrel: sourceExe puede apuntar a una carpeta app-X.Y.Z vieja.
+    # Se busca la carpeta app-* mas reciente para leer la version real.
+    if ($cfg.sourceExe -match '\\app-[0-9]') {
+        $root = Split-Path -Parent (Split-Path -Parent $cfg.sourceExe)
+        if ($root -and (Test-Path -LiteralPath $root)) {
+            $appDirs = Get-ChildItem -LiteralPath $root -Directory -Filter 'app-*' `
+                         -ErrorAction SilentlyContinue |
+                       Sort-Object -Property @{ Expression = {
+                           $clean = ($_.Name -replace '^app-','') -replace '[^0-9\.].*$',''
+                           $clean = $clean.Trim('.')
+                           if (-not $clean -or $clean -notmatch '\.') { $clean = "$clean.0" }
+                           $v = [version]'0.0'
+                           if ([version]::TryParse($clean, [ref]$v)) { $v } else { [version]'0.0' }
+                       } } -Descending
+            foreach ($d in $appDirs) {
+                $candidate = Join-Path $d.FullName 'claude.exe'
+                if (Test-Path -LiteralPath $candidate) {
+                    try {
+                        $fi = [Diagnostics.FileVersionInfo]::GetVersionInfo($candidate)
+                        if ($fi.FileVersion) { return $fi.FileVersion.Trim() }
+                    } catch { }
+                    return ($d.Name -replace '^app-','')
+                }
+            }
+        }
+    }
     try {
         $fi = [Diagnostics.FileVersionInfo]::GetVersionInfo($cfg.sourceExe)
         if ($fi.FileVersion) { return $fi.FileVersion.Trim() }
     } catch { }
     return $null
-}
-
-function Test-PortableBusy {
-    if (-not $cfg.portableDir) { return $false }
-    $prefix = $cfg.portableDir.TrimEnd('\') + '\'
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        try { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) }
-        catch { $false }
-    }
-    return (@($procs).Count -gt 0)
 }
 
 # --- Comprobar si hay version nueva -----------------------------------------
@@ -1571,10 +1612,14 @@ elseif ($cfg.mode -eq 'Msix') {
     $installed = Get-InstalledVersion
     if ($installed -and $installed -ne $stampVer) { $update = $true }
 }
-
-if ($update -and (Test-PortableBusy)) {
-    # No se puede reemplazar la copia con Claude abierto desde ella.
-    $update = $false
+elseif ($cfg.mode -eq 'Direct') {
+    # Squirrel crea carpetas app-X.Y.Z nuevas al actualizar. Se compara la
+    # version que habia al configurar (cfg.version) con la que hay ahora en
+    # disco. Get-InstalledVersion ya busca la carpeta app-* mas reciente.
+    $installed = Get-InstalledVersion
+    if ($installed -and $cfg.version -and $installed -ne $cfg.version) {
+        $update = $true
+    }
 }
 
 if ($update) {
@@ -2651,24 +2696,7 @@ function Invoke-MultiSetup {
 
         if ($needsCopy) {
             Write-Note $copyReason
-
-            $running = @(Get-PortableProcess -PortablePath $TargetPortableDir)
-            if ($running.Count -gt 0) {
-                Write-Warn (Get-I18nStr 'MsgPortableBusy' @($($running.Count), $TargetPortableDir))
-                Write-Warn (Get-I18nStr 'MsgCannotReplace')
-                Write-Note (Get-I18nStr 'MsgCloseAndRetry')
-                Write-Note (Get-I18nStr 'MsgKeepUsingCurrent')
-                $needsCopy = $false
-                if ($stamp -and (Test-Path -LiteralPath $stamp.exe)) {
-                    $targetExe = $stamp.exe
-                }
-                else {
-                    $found = Get-ChildItem -LiteralPath $TargetPortableDir -Filter 'claude.exe' -Recurse `
-                               -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if (-not $found) { throw (Get-I18nStr 'ErrNoClaudeExe' @($TargetPortableDir)) }
-                    $targetExe = $found.FullName
-                }
-            }
+            if (-not (Stop-PortableProcesses -PortablePath $TargetPortableDir)) { return $false }
         }
 
         $copied = -not $needsCopy

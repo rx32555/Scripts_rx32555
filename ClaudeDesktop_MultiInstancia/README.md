@@ -92,7 +92,7 @@ Al copiar la app, el script deja un sello `C:\ClaudePortable\.claude-multi.json`
 | Misma versión | Nada. Termina en ~1 segundo. |
 | Claude se actualizó | Prepara y valida una copia nueva; luego la activa y retira la anterior. Si falla, la versión que funcionaba queda intacta. |
 | Copia borrada, movida o corrupta | La rehace. |
-| Hay Claude abierto desde la copia portable | No toca nada y abre igual (no se puede reemplazar un `.exe` en uso). |
+| Hay Claude abierto desde la copia portable y se necesita recopia | Cierra esas instancias, espera a que salgan y actualiza. Si alguna no se puede cerrar, avisa y deja intacta la copia actual. |
 
 El primer perfil no depende de esto: se lanza por el paquete de la Store y Windows lo actualiza solo.
 

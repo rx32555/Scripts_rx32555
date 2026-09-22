@@ -35,6 +35,7 @@ $stubSource = @'
 [CmdletBinding(PositionalBinding = $false)]
 param([string[]]$Profiles, [string]$PortableDir, [string]$Language)
 Write-Output "started:$($Profiles -join '|')"
+Write-Host '    [!]    Cerrando instancias de la copia portable para actualizarla...'
 Start-Sleep -Milliseconds 1200
 Write-Output 'finished'
 exit 0
@@ -93,6 +94,9 @@ try {
     if ($script:GuiSetupJob) { throw 'Background process did not finish' }
     if ($txtLog.Text -notmatch 'started:Cuenta1\|Cuenta dos' -or $txtLog.Text -notmatch 'finished') {
         throw "GUI did not receive child output: $($txtLog.Text)"
+    }
+    if ($txtLog.Text -notmatch 'Cerrando instancias de la copia portable') {
+        throw "GUI did not receive the update warning: $($txtLog.Text)"
     }
     if ($script:busy) { throw 'GUI remained busy after completion' }
     if (-not $script:refreshed) { throw 'Profile list was not refreshed' }
